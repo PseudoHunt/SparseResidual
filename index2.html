@@ -1,0 +1,1003 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Every Room, Once</title>
+<style>
+  :root{
+    --bg:#0e0e0e;
+    --fg:#eaeaea;
+    --panel:#151515;
+    --border:#3a3a3a;
+  }
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--fg);
+    font-family: Georgia, serif;
+    display:flex;
+    justify-content:center;
+    padding:32px 16px;
+  }
+  #game{
+    width:min(760px, 100%);
+    line-height:1.65;
+  }
+  #header{
+    display:flex;
+    justify-content:space-between;
+    align-items:flex-end;
+    margin-bottom:18px;
+    padding:12px 14px;
+    border:1px solid var(--border);
+    background:var(--panel);
+  }
+  #room-name{
+    font-weight:700;
+    letter-spacing:1px;
+  }
+  #clock{
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    opacity:.9;
+  }
+  #prose{
+    white-space:pre-wrap;
+    padding:18px 16px;
+    border:1px solid var(--border);
+    background:var(--panel);
+    min-height:260px;
+    margin-bottom:14px;
+  }
+  #actions{
+    display:flex;
+    flex-wrap:wrap;
+    gap:10px;
+    align-items:center;
+  }
+  .group{
+    border:1px solid var(--border);
+    background:var(--panel);
+    padding:10px 10px;
+    display:flex;
+    flex-wrap:wrap;
+    gap:8px;
+    align-items:center;
+  }
+  .label{
+    opacity:.8;
+    margin-right:6px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size:12px;
+  }
+  button{
+    background:#222;
+    color:var(--fg);
+    border:1px solid #555;
+    padding:8px 12px;
+    cursor:pointer;
+    font-family:inherit;
+    border-radius:6px;
+  }
+  button:hover{ background:#2c2c2c; }
+  button:disabled{
+    opacity:.45;
+    cursor:not-allowed;
+  }
+
+  #overlay{
+    position:fixed;
+    inset:0;
+    background:#ffffff;
+    color:#111;
+    display:none;
+    align-items:center;
+    justify-content:center;
+    padding:40px 18px;
+    text-align:left;
+  }
+  #overlayCard{
+    width:min(760px, 100%);
+    white-space:pre-wrap;
+    font-size:18px;
+    line-height:1.65;
+  }
+  #overlayHint{
+    margin-top:16px;
+    font-size:12px;
+    opacity:.7;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+</style>
+</head>
+
+<body>
+<div id="game">
+  <div id="header">
+    <div id="room-name"></div>
+    <div id="clock"></div>
+  </div>
+
+  <div id="prose"></div>
+
+  <div id="actions">
+    <div class="group" id="movementGroup">
+      <span class="label">Go to:</span>
+      <span id="movement"></span>
+    </div>
+
+    <div class="group" id="examineGroup">
+      <span class="label">Action:</span>
+      <span id="examine"></span>
+    </div>
+
+    <div class="group" id="inventoryGroup">
+      <span class="label">Inventory:</span>
+      <span id="inventory"></span>
+    </div>
+  </div>
+</div>
+
+<div id="overlay" onclick="hideOverlay()">
+  <div id="overlayCard">
+    <div id="overlayText"></div>
+    <div id="overlayHint">(click anywhere to continue)</div>
+  </div>
+</div>
+
+<script>
+/* ==============================
+   FULL PROSE DATA (CANON)
+   ============================== */
+
+const rooms = {
+  intro: {
+    name: "BEFORE THE HOUSE",
+    states: {
+      1: `The storm arrives without warning.
+
+The sea darkens first.
+Then the sky follows.
+
+Waves strike the hulls harder than they should,
+too early in the season for this kind of weather.
+
+Naval vessels move quickly into the water.
+Orders are shouted.
+Lights cut through rain.
+
+Fishing boats drift farther out than planned,
+their silhouettes swallowed and returned by the waves.
+
+You watch from the shore.
+
+Among the chaos, one boat stands apart.
+
+It is smaller than the others.
+Unlit.
+Too still for the water it rests on.
+
+It drifts closer as if guided,
+though nothing pulls it.
+
+No one calls out from it.
+No one warns you away.
+
+You step aboard.
+
+The deck is slick beneath your feet.
+The smell of salt and old wood lingers in the air.
+
+A narrow door leads below.`
+    }
+  },
+
+  foyer: {
+    name: "FOYER",
+    states: {
+      1: `The foyer is quiet.
+
+Doors branch away from it,
+each leading deeper into the house.
+
+A clock hangs above the doorway.
+
+Its face is plain.
+Its hands move steadily.
+
+The house feels awake.`,
+      2: `The foyer is quiet.
+
+The clock’s hand has moved.
+The doors remain where they were.
+
+The house does not react to your impatience.`,
+      3: `The foyer does not change.
+
+The clock does.
+
+Its movement feels certain,
+as if the house depends on it.`,
+      4: `The foyer is still.
+
+You become aware of how sound behaves here—
+how quickly it stops.`,
+      5: `The foyer feels the same.
+
+The clock continues.
+
+Nothing in the house acknowledges the passing hour.`,
+      6: `The foyer is quiet.
+
+The air feels clean,
+as if it has been reset before.`,
+      7: `The foyer remains a crossroads.
+
+The clock remains a promise.`,
+      8: `The foyer is unchanged.
+
+Only the clock insists that time is real.`,
+      9: `The foyer is still.
+
+The doors wait without expectation.`,
+      10:`The foyer feels slightly colder.
+
+Not from weather—
+from certainty.`,
+      11:`The foyer is quiet.
+
+The clock’s hand approaches its end.
+
+The house does not hurry.`,
+      12:``
+    }
+  },
+
+  nursery: {
+    name: "NURSERY",
+    states: {
+      1: `The nursery greets you the same way as before.
+
+Crib.
+Wall.
+Silence.
+
+The wall behind the crib is smooth.
+Unbroken.
+Almost polished.
+
+Your eyes slide off it without finding anything to hold onto.`,
+      2: `The room remains still.
+
+But the wall feels different now.
+
+Not cracked.
+Not marked.
+
+Just—
+tense.
+
+For a moment, it sounds as if something shifts behind it.
+A faint suggestion of movement.
+
+That can’t be right.
+The wall is stone.`,
+      3: `The hum returns.
+
+Briefly, the wall wavers.
+
+So quickly you nearly miss it—
+a flicker, like heat distortion.
+
+When you look again, the surface is smooth once more.
+
+The nursery does not react to your attention.`,
+      4: `The nursery greets you the same way as before.
+
+Crib.
+Wall.
+Silence.
+
+But now, standing here, you feel it more clearly:
+
+This room is not finished with you.
+
+Your fingers meet the wall.
+
+There is resistance—
+and then there isn’t.
+
+Your hand passes through as if the surface were smoke.
+
+Behind it, the space feels colder.
+
+You understand something now.
+The house does not always hold its shape.`,
+      5: `The wall looks solid again.
+
+If you hadn’t touched it,
+you might believe nothing happened here at all.
+
+The hum has faded.`,
+      6: `The nursery feels heavier.
+
+The crib casts a shadow that doesn’t quite match the light.
+
+You adjust your footing without realizing why.`,
+      7: `The air settles.
+
+The room exhales, slowly,
+as if releasing a held breath.
+
+The wall does not respond to your touch.`,
+      8: `Everything appears ordinary.
+
+The nursery offers no explanation,
+and no invitation.
+
+It feels as though something important has already passed.`,
+      9: `The silence here is easier to ignore now.
+
+The crib stands where it always has.
+
+The wall holds firm.`,
+      10:`You notice how still the room has become.
+
+Not waiting.
+Not listening.
+
+Finished.`,
+      11:`The nursery feels smaller than you remember.
+
+Not physically—
+but in the way a thought feels smaller once it’s resolved.`,
+      12:`The nursery greets you the same way as before.
+
+Crib.
+Wall.
+Silence.
+
+Whatever this room had to offer
+has already been given.`
+    },
+    examine: {
+      4: {
+        gives: "Veil Fragment",
+        text: `You press your hand farther into the wall.
+
+The surface offers no resistance now.
+
+Your fingers close around something cool and pliable,
+as if the air itself had folded.
+
+You draw it out slowly.
+
+In your palm rests a thin, translucent shard—
+a Veil Fragment.
+
+It does not reflect the room.
+It absorbs it.
+
+The wall firms beneath your hand again.`,
+        // Bug 2 fix: do not advance time when an artifact is captured
+        noTimeAdvanceOnSuccess: true
+      }
+    }
+  },
+
+  basement: {
+    name: "BASEMENT",
+    states: {
+      1: `The basement smells of stone and metal.
+
+The floor is dry.
+Cold beneath your feet.
+
+Pipes run along the ceiling.
+They do not move.
+
+Nothing here appears to be in a hurry.`,
+      2: `You notice dark patches along the walls.
+
+Not water.
+Just stone holding on to something it hasn’t let go of yet.
+
+The pipes creak once.
+
+Then fall silent again.`,
+      3: `The air feels heavier now.
+
+A thin dampness spreads across the floor.
+Your footsteps leave marks that fade slowly.
+
+Somewhere nearby, something drips.
+You cannot see where.`,
+      4: `Water gathers between the tiles.
+
+It does not rush.
+It settles.
+
+One tile near the back wall sits slightly lower than the rest.
+You can’t say when it became noticeable.`,
+      5: `The water reaches the edges of your shoes.
+
+The uneven tile shifts when you step close to it.
+Only slightly.
+Enough to feel wrong.
+
+The pipes begin to rattle, quietly.`,
+      6: `The basement is ankle-deep now.
+
+The loose tile rocks again.
+More clearly this time.
+
+The sound of water fills the room,
+steady and patient.`,
+      7: `The water rises faster than before.
+
+The loose tile lifts and settles,
+as if testing whether it still belongs here.
+
+The room feels tense.
+Balanced on something thin.`,
+      8: `The water surges.
+
+The tile tears free with a sharp crack,
+vanishing beneath the surface.
+
+In its place is an opening,
+dark and uneven.
+
+Cold air rushes up from below.
+The water presses toward it.`,
+      9: `The water stops rising.
+
+It churns around the opening,
+carrying fragments with it.
+
+The edges hold,
+for now.`,
+      10:`The water begins to recede.
+
+The opening narrows as fragments scrape against it.
+The edges grind softly, like teeth.
+
+The sound fades.`,
+      11:`Only shallow water remains.
+
+The floor has shifted.
+The tile sits close to where it once was,
+but not quite.
+
+Nothing in the room acknowledges the change.`,
+      12:`The basement is dry again.
+
+The pipes are silent.
+The floor is still.
+
+If something happened here,
+the room no longer shows it.`
+    },
+    examine: {
+      8: {
+        gives: "Anchor Stone",
+        text: `You reach into the opening as the water presses past your arm.
+
+Your fingers meet something solid.
+
+It is heavier than it looks,
+unwilling to move,
+as if the room itself were holding it in place.
+
+With effort, you pull it free.
+
+The water rushes in behind it.
+
+In your grasp is a dark, weighty object—
+an Anchor Stone.
+
+The current changes when it is gone.`,
+        // Bug 2 fix:
+        noTimeAdvanceOnSuccess: true
+      }
+    }
+  },
+
+  library: {
+    name: "LIBRARY",
+    states: {
+      1: `The library smells of dust and old paper.
+
+Shelves line the walls.
+Neat.
+Orderly.
+
+A bell hangs from a cord at the center of the room.
+
+It does not move.`,
+      2: `The shelves feel taller than before.
+
+Not closer.
+Just more present.
+
+The bell sways slightly,
+though there is no draft.`,
+      3: `The room is quiet,
+but not empty.
+
+When you stop moving,
+the shelves seem to lean inward.
+
+The bell steadies itself.`,
+      4: `The air feels tense.
+
+The cord above the bell twists,
+then slowly untwists again.
+
+The sound of it is almost nothing.
+Almost.`,
+      5: `The bell begins to sway.
+
+Not enough to ring.
+Just enough to notice.
+
+The shelves no longer feel evenly spaced.`,
+      6: `The bell rings once.
+
+The sound is clean.
+Sharp.
+Final.
+
+The shelves shift in response,
+sliding just enough to reveal a narrow passage.
+
+The bell falls still again.`,
+      7: `The room has settled.
+
+The bell hangs motionless.
+
+The shelves remain where they are now,
+as if they have always been this way.`,
+      8: `The library feels quieter than before.
+
+Not calmer.
+Quieter.
+
+The passage does not draw attention to itself.`,
+      9: `Dust settles along the floor.
+
+The bell does not respond to your presence.
+
+The shelves do not move.`,
+      10:`The cord above the bell hangs straight.
+
+Too straight.
+
+The space between the shelves feels deliberate.`,
+      11:`The library feels smaller.
+
+Not because anything has moved,
+but because there is less to notice now.`,
+      12:`The library smells of dust and old paper.
+
+Shelves line the walls.
+Neat.
+Orderly.
+
+The bell hangs at the center of the room.
+
+It does not move.`
+    },
+    examine: {
+      6: {
+        gives: "Resonance Key",
+        text: `You step into the narrow space between the shelves.
+
+The air here feels measured,
+as if sound itself has weight.
+
+Resting against the wood is a small, angular object.
+
+When you touch it,
+the shelves settle fully into place.
+
+The object remains in your hand.
+
+A Resonance Key.
+
+It does not hum.
+It does not vibrate.
+
+It simply feels complete.`,
+        // Bug 2 fix:
+        noTimeAdvanceOnSuccess: true
+      }
+    }
+  },
+
+  attic: {
+    name: "ATTIC",
+    states: {
+      1: `The attic is dim.
+
+The ceiling slopes inward.
+The floorboards creak beneath your weight.
+
+Dust hangs in the air,
+undisturbed.`,
+      2: `The space feels tighter than before.
+
+Not smaller—
+just less forgiving.
+
+When you shift your stance,
+the boards respond a moment later than expected.`,
+      3: `The air is warm.
+
+Too warm for a space this high.
+
+The ceiling seems closer when you look up,
+though you are sure it hasn’t moved.`,
+      4: `The floor tilts slightly.
+
+So slightly you might blame yourself for noticing it.
+
+Dust slides a fraction of an inch
+before settling again.`,
+      5: `The attic groans.
+
+Not from the walls—
+from the space itself.
+
+You feel pressure behind your eyes,
+as if gravity is considering a new direction.`,
+      6: `The floorboards bend.
+
+They do not crack.
+They simply yield.
+
+Your balance feels temporary.`,
+      7: `The ceiling creaks in answer to the floor.
+
+For a moment,
+it is unclear which one is holding the other in place.
+
+The attic feels suspended.`,
+      8: `The air shifts.
+
+Loose dust rises instead of falling.
+
+Your body reacts before your thoughts do.`,
+      9: `The floor pulls sideways.
+
+Not enough to throw you—
+enough to demand attention.
+
+Nothing here feels aligned anymore.`,
+      10:`The attic inverts.
+
+The floor becomes the ceiling.
+The ceiling becomes the floor.
+
+Everything holds,
+as if this has always been the correct arrangement.
+
+Your body understands before you do.`,
+      11:`The pressure eases.
+
+Gravity settles back into place,
+slowly,
+reluctantly.
+
+The boards complain as they realign.`,
+      12:`The attic is dim.
+
+The ceiling slopes inward.
+The floorboards creak beneath your weight.
+
+Dust hangs in the air,
+undisturbed.`
+    },
+    examine: {
+      10: {
+        requires: ["Veil Fragment","Resonance Key","Anchor Stone"],
+        ending: true,
+        text: `You bring the artifacts closer.
+
+The Veil Fragment settles into the first recess
+without friction.
+
+The Resonance Key aligns with the second,
+its edges matching perfectly.
+
+The Anchor Stone resists,
+then yields,
+locking into place with quiet finality.
+
+The object accepts the arrangement.
+
+Nothing lights up.
+Nothing moves.
+
+The attic eases around it,
+as if something long held has finally been set down.`
+      }
+    }
+  }
+};
+
+const ROOM_LIST = ["nursery","library","basement","attic"];
+
+/* ==============================
+   GAME STATE
+   ============================== */
+
+let state = {
+  room: "intro",
+  hour: 0,          // Bug 1 fix: start at 0 o'clock
+  inventory: [],
+  ended: false
+};
+
+/* ==============================
+   OVERLAY
+   ============================== */
+
+function showOverlay(text){
+  document.getElementById("overlayText").innerText = text;
+  document.getElementById("overlay").style.display = "flex";
+}
+
+function hideOverlay(){
+  document.getElementById("overlay").style.display = "none";
+}
+
+/* ==============================
+   CORE TIME LOGIC
+   internal hour: 0..11
+   prose index: hour+1 => 1..12
+   ============================== */
+
+function advanceTime(){
+  if (state.ended) return;
+
+  state.hour += 1;
+
+  // At the moment time would become 12, strike and reset
+  if (state.hour >= 12){
+    triggerClockStrike();
+    return;
+  }
+
+  render();
+}
+
+function triggerClockStrike(){
+  showOverlay(`The clock strikes.
+
+Once.
+Cleanly.
+
+A sudden white light fills the space,
+erasing edges and shadows alike.
+
+The sound carries through the house,
+touching every room at the same time.`);
+
+  // Reset to start of loop
+  state.hour = 0;
+  state.room = "foyer";
+
+  render();
+}
+
+function triggerEnding(){
+  state.ended = true;
+
+  showOverlay(`The object holds.
+
+For a moment, nothing else does.
+
+A white light fills the attic,
+clean and absolute.
+
+Edges vanish.
+Sound thins.
+The house releases its shape.
+
+—
+
+You are standing on the deck of a boat.
+
+Daylight rests on the water.
+The sky is clear.
+
+The ocean moves gently,
+as if it has never known the storm.
+
+The deck beneath your feet is dry.
+The air smells of salt and sun-warmed wood.
+
+In the distance, a fishing boat approaches.
+Its engine hums steadily.
+
+Someone stands at the bow,
+shielding their eyes as they look toward you.
+
+The water is calm enough now
+that nothing feels urgent.
+
+The boat draws closer.
+
+Whatever carried you here
+does not follow.`);
+
+  render();
+}
+
+/* ==============================
+   ACTIONS
+   ============================== */
+
+function enterHouse(){
+  // Bug 3 fix:
+  // Intro text stops BEFORE going below deck.
+  // Clicking proceeds into the transition + foyer.
+  showOverlay(`You descend.
+
+The space beneath the deck is dark.
+Close.
+The sound of the storm dulls, as if wrapped in cloth.
+
+Behind you, the door shuts.
+
+You turn instinctively.
+Pull at the handle.
+
+It does not move.
+
+A light flickers on.
+
+You are standing in a foyer.`);
+
+  // Entering the house does NOT consume time (cleaner onboarding)
+  state.room = "foyer";
+  state.hour = 0;
+
+  render();
+}
+
+function moveTo(roomKey){
+  state.room = roomKey;
+  advanceTime(); // movement costs 1 hour
+}
+
+function examine(){
+  const room = rooms[state.room];
+  const proseIndex = state.hour + 1;
+  const ex = room.examine?.[proseIndex];
+  if (!ex) return;
+
+  if (ex.requires){
+    const ok = ex.requires.every(item => state.inventory.includes(item));
+    if (!ok){
+      showOverlay(`You examine it.
+
+The recesses remain empty.
+
+Something is missing.`);
+      return; // no time cost
+    }
+  }
+
+  const alreadyHad = ex.gives ? state.inventory.includes(ex.gives) : false;
+
+  showOverlay(ex.text);
+
+  if (ex.gives && !alreadyHad){
+    state.inventory.push(ex.gives);
+  }
+
+  if (ex.ending){
+    triggerEnding();
+    return;
+  }
+
+  // Bug 2 fix:
+  // If this examine successfully gives an artifact, do NOT advance time.
+  // (You return to the room state you arrived on.)
+  if (ex.gives && !alreadyHad && ex.noTimeAdvanceOnSuccess){
+    render();
+    return;
+  }
+
+  // Otherwise, examine costs 1 hour
+  advanceTime();
+}
+
+/* ==============================
+   RENDER
+   ============================== */
+
+function render(){
+  const room = rooms[state.room];
+
+  document.getElementById("room-name").innerText = room?.name || "";
+
+  document.getElementById("clock").innerText = state.ended
+    ? "—"
+    : `Time: ${state.hour} / 12`;
+
+  // Prose rendering:
+  // intro uses its own fixed text
+  // other rooms use hour+1 to map to State 1..12
+  let proseText = "";
+  if (state.room === "intro"){
+    proseText = rooms.intro.states[1];
+  } else {
+    const proseIndex = state.hour + 1;
+    proseText = room.states[proseIndex] || "";
+  }
+
+  document.getElementById("prose").innerText = proseText;
+
+  // Inventory
+  document.getElementById("inventory").innerText =
+    state.inventory.length ? state.inventory.join(", ") : "—";
+
+  // Movement buttons
+  const movementEl = document.getElementById("movement");
+  movementEl.innerHTML = "";
+
+  // Examine button
+  const examineEl = document.getElementById("examine");
+  examineEl.innerHTML = "";
+
+  if (state.ended){
+    document.getElementById("movementGroup").style.opacity = 0.5;
+    document.getElementById("examineGroup").style.opacity = 0.5;
+    document.getElementById("inventoryGroup").style.opacity = 0.9;
+    return;
+  } else {
+    document.getElementById("movementGroup").style.opacity = 1;
+    document.getElementById("examineGroup").style.opacity = 1;
+    document.getElementById("inventoryGroup").style.opacity = 0.9;
+  }
+
+  if (state.room === "intro"){
+    const b = document.createElement("button");
+    b.innerText = "Go below deck";
+    b.onclick = enterHouse;
+    movementEl.appendChild(b);
+
+    examineEl.innerText = "—";
+    return;
+  }
+
+  ROOM_LIST.forEach(k => {
+    const b = document.createElement("button");
+    b.innerText = rooms[k].name;
+    b.onclick = () => moveTo(k);
+    movementEl.appendChild(b);
+  });
+
+  // Examine appears if room has examine for current proseIndex
+  const proseIndex = state.hour + 1;
+  const ex = rooms[state.room]?.examine?.[proseIndex];
+  if (ex){
+    const b = document.createElement("button");
+    b.innerText = "Examine";
+    b.onclick = examine;
+    examineEl.appendChild(b);
+  } else {
+    examineEl.innerText = "—";
+  }
+}
+
+/* ==============================
+   START
+   ============================== */
+render();
+</script>
+</body>
+</html>
