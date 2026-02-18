@@ -1,0 +1,43 @@
+## Simple Summary (Patent Abstract Style)
+
+The invention proposes a neural architecture search method for automatically determining the optimal rank of Low-Rank Adaptation (LoRA) modules used in fine-tuning large neural networks. Instead of manually selecting LoRA rank, multiple LoRA branches with different ranks are introduced in parallel within each neural network layer. Each branch is controlled by a learnable architecture parameter (alpha) passed through a sigmoid gating function.
+
+During training, both LoRA weights and architecture parameters are jointly optimized using a DARTS-style differentiable optimization framework. An entropy-based regularization term encourages selection of a single dominant LoRA rank branch, enabling automatic model capacity selection while maintaining computational efficiency. After training, the branch with the highest gate activation is retained, producing a compact, optimized LoRA configuration.
+
+This approach enables efficient parameter selection, reduced manual tuning, and improved adaptability of parameter-efficient fine-tuning methods for large-scale neural networks.
+
+---
+
+## Slide 1 — Problem & Proposed Method
+
+### Problem
+• LoRA rank selection is currently manual and heuristic  
+• Incorrect rank causes either:
+  – Underfitting (rank too small)  
+  – Excess compute/memory (rank too large)  
+• No efficient automated mechanism exists for rank selection during fine-tuning  
+
+### Proposed Solution
+• Introduce multiple LoRA rank branches per layer  
+• Each branch gated by learnable sigmoid(alpha) parameter  
+• Joint optimization of:
+  – LoRA weights  
+  – Rank-selection architecture parameters  
+• Entropy regularization forces eventual selection of one optimal rank  
+
+---
+
+## Slide 2 — Key Innovation & Benefits
+
+### Core Innovation
+• Differentiable NAS framework applied specifically to LoRA rank selection  
+• Multi-branch LoRA with continuous gating relaxation  
+• Entropy-guided collapse to a single rank configuration  
+• Automatic discovery of optimal parameter-efficient adaptation capacity  
+
+### Advantages
+• Eliminates manual rank tuning  
+• Improves fine-tuning efficiency and generalization  
+• Compatible with large language models and quantized models  
+• Reduces compute and memory overhead post-training  
+• Easily integrable into existing LoRA fine-tuning pipelines
