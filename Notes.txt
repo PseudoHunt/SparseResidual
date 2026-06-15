@@ -1,0 +1,291 @@
+Got it — keeping it technical and direct, without the legal scaffolding. Here’s the same content rewritten as plain technical description of the method and its claimable elements.
+
+Independent claim 1 — the calibration method
+
+A method for post-training quantization of pre-trained neural network weights that does the following:
+
+Sets up a two-level codebook for each weight tensor. The coarse codebook has fewer codewords with a larger step size; the fine codebook has more codewords with a smaller step size. The step sizes are related by a factor of two, so every coarse codeword is also a fine codeword. The coarse codebook is a strict subset of the fine codebook.
+
+Assigns each weight a continuous-relaxed mask value that decides whether the weight is reconstructed using the coarse codebook or the fine codebook. The mask is per-weight, not per-layer or per-channel.
+
+Maintains two continuous projection parameters — one for each codebook level. The two projection parameters are tied by the factor-of-two step relationship, so they share arithmetic and gradient information.
+
+Optimizes the two projection parameters and the per-weight mask jointly, by gradient descent, against a single block-wise reconstruction loss using a small unlabeled calibration set. The pre-trained weights themselves are frozen throughout. Gradient updates to one projection parameter propagate to the other through the structural coupling.
+
+Independent claim 2 — the inference artifact
+
+A stored quantized weight tensor that has the following properties:
+
+Every weight is stored as a fine-codebook index. There is no separate buffer for coarse-assigned weights and fine-assigned weights — they share storage layout.
+
+Weights assigned to the coarse codebook hold fine-codebook indices that correspond to coarse codewords (i.e., their low-order bit is structurally fixed). Weights assigned to the fine codebook hold fine-codebook indices spanning the full fine codebook.
+
+At inference, the entire tensor is dequantized through a single kernel and a single memory traversal. There is no branching on assignment, no accumulation across precision streams, and no separate dequantization path for coarse weights versus fine weights.
+
+Dependent claims — features that narrow or specify the main method
+
+	3.	Each projection parameter is optimized against only the subset of weights assigned to its codebook by the mask, and the subset and the projection parameter adapt to each other during calibration. The coarse projection sees only coarse-assigned weights; the fine projection sees only fine-assigned weights. Neither is optimized against the full tensor.
+	4.	The reconstruction loss is weighted per-weight by output sensitivity coefficients (e.g., diagonal Fisher) derived from the pre-trained network, so higher-sensitivity weights contribute more to the loss.
+	5.	The per-weight mask is relaxed via a straight-through estimator and regularized with a sparsity penalty to enforce a target storage budget (i.e., a target fraction of weights at fine resolution).
+	6.	The structural step-size ratio between fine and coarse codebooks is exactly two.
+	7.	The method extends to three or more codebook levels, each a strict subset of the next finer level under the same factor-of-two step relationship. The mask becomes a multi-valued assignment selecting among the available levels, and there is one projection parameter per level, all jointly optimized.
+	8.	The calibration set is small (typically fewer than a thousand unlabeled sequences). Calibration runs block-by-block through the network. No gradients flow across blocks. No task loss is used. No labeled data is used.
+	9.	In the stored tensor, weights assigned to the coarse codebook have their low-order bit (or low-order bits, for deeper hierarchies) structurally fixed at zero by virtue of the codebook nesting.
+	10.	The two projection parameters in the stored representation are related by an integer factor (specifically two, or a power of two for deeper hierarchies).
+
+What each claim is doing for you
+
+Claim 1 is the broadest version of the invention — the calibration procedure with joint optimization. This is what you want to protect first.
+
+Claim 2 covers the deployed model separately, in case someone uses your calibration method but distributes the resulting weights, or uses a different calibration but produces an artifact with the same structural properties.
+
+Claim 3 is your sharpest MatQuant differentiator (subset-specific scale calibration). I kept it as a dependent claim rather than baking it into claim 1, because claim 1 should stay broad — claim 3 is a fallback that survives even if claim 1 is challenged.
+
+Claim 4 specifies Fisher weighting in the loss. Optional but useful.
+
+Claim 5 specifies the implementation mechanism for the mask. Defensive — covers the actual mechanism so a design-around using a different relaxation can be addressed.
+
+Claim 6 fixes the step ratio at two. Defensive — narrows to the specific case for clarity.
+
+Claim 7 generalizes to deeper hierarchies. Important because your defense against “this only works at two levels” lives here.
+
+Claim 8 spells out the PTQ characteristics. Defensive against any “this is QAT” attack at the patent office.
+
+Claims 9 and 10 are artifact-level fallbacks that protect against competitors who implement the artifact slightly differently.
+
+Tell me if you want me to expand any of these into more specific variants, add new claims for elements I haven’t covered, or rewrite anything in an even more compact form. The person making this professional later will reshape the language; what matters from your side is that the technical content is complete and the claimable distinctions
+are all named explicitly.
+
+
+
+Here are the main patentable points, distilled to the specific technical elements that carry the novelty. I’ve ordered them by defensibility — strongest claims first — and noted what each one protects against.
+
+Point 1 — Per-weight learnable assignment mask, jointly optimized with codebook parameters under a single reconstruction loss
+
+The method introduces a continuous-relaxed assignment variable, one per weight, that decides which codebook level the weight is reconstructed from. The mask is not precomputed from a sensitivity criterion — it is a learnable parameter updated by gradient descent inside the calibration loop, alongside the codebook projection parameters, under a single block-wise reconstruction loss.
+
+What this protects against: every prior method (AWQ, SqueezeLLM, PTQ1.61, HAWQ, LLM-MQ, OWQ, MatGPTQ, MatQuant) determines the precision assignment either by precomputed sensitivity ranking, deployment-time slicing, or discrete budget search. None of them treat the per-weight assignment as a learnable variable co-optimized with the projections in a unified gradient-based procedure.
+
+Point 2 — Subset-specific projection calibration via co-adaptation of scale and assignment
+
+Each codebook level’s projection parameter is calibrated against only the subset of weights assigned to that level by the mask. The coarse projection sees only coarse-assigned weights; the fine projection sees only fine-assigned weights. The subset and the projection co-adapt during the joint optimization — the projection shapes itself to the subset’s statistics, and the assignment shifts as the projection improves.
+
+What this protects against: MatQuant specifically. MatQuant calibrates each precision’s scale under the assumption that all weights in the tensor are at that precision (uniform-precision optimization repeated per level). This produces different scale values than ours, and the difference is empirically measurable. This is your single sharpest technical differentiator from MatQuant.
+
+Point 3 — Structural coupling of projection parameters across codebook levels via dyadic nesting
+
+The two projection parameters are not independent. They are tied by the factor-of-two step relationship between the coarse and fine codebooks. Gradient updates to one propagate to the other through this structural coupling, so every weight contributes gradient signal to both projections regardless of its current assignment.
+
+What this protects against: the “you just combined multi-precision with scale search” objection. A naive combination of independent multi-precision codebooks with learnable scales produces decoupled scales with ill-posed assignment gradients (because the scales are arithmetically incompatible, so moving a weight across the assignment boundary causes a discontinuity). The nesting is the specific mechanism that makes joint optimization well-posed.
+
+Point 4 — Hierarchical codebook structure as nested sub-lattices under a dyadic step-ratio constraint
+
+The codebooks at successive precision levels form a strict subset hierarchy: every coarse codeword coincides with a fine codeword, the step ratio is exactly two (or a power of two for deeper hierarchies), and the entire structure can be described as nested sub-lattices on the real line.
+
+What this protects against: the “this is just any subset selection” objection. The nesting is not an arbitrary choice — it is the structural condition that enables Points 1, 2, and 3. The dyadic constraint specifically produces the bit-shift relationship between codebook indices that the inference artifact (Point 6) depends on.
+
+Point 5 — Generalization to N-level hierarchies
+
+The same calibration procedure extends to three or more codebook levels, each a strict subset of the next finer level under the dyadic constraint. The mask becomes multi-valued, the projections become one per level, and the joint optimization runs over all of them.
+
+What this protects against: design-arounds using deeper hierarchies (e.g., a competitor doing the same thing across four precision levels). Without this point, a four-level implementation could arguably escape a two-level claim.
+
+Point 6 — Unified single-kernel inference artifact via codebook collapse
+
+The deployed quantized tensor stores all weights as fine-codebook indices, regardless of their assigned level. Weights assigned to the coarse codebook hold fine-codebook indices that correspond to coarse codewords (their low-order bits are structurally fixed). The entire tensor is dequantized through a single kernel and a single memory traversal at inference, with no branching on assignment, no separate buffers, and no accumulation across precision streams.
+
+What this protects against: every prior mixed-precision method whose inference path requires two kernels, two memory traversals, or accumulation. Also covers the deployment artifact independently of the calibration method — useful if a competitor distributes a model that has these structural properties without admitting to the calibration procedure that produced it.
+
+Point 7 — Method operates entirely in the post-training quantization regime
+
+The pre-trained weights are frozen throughout calibration. No task loss is used. No labeled data is used. The calibration set is small and unlabeled. Calibration runs block-by-block with no gradient flow across blocks. Compute and data requirements are at PTQ scale, not QAT scale.
+
+What this protects against: the “this is QAT or a PTQ/QAT hybrid” objection at the patent office. Also distinguishes you from MatQuant (original), which is QAT-based.
+
+The minimal core
+
+If you had to pick the three points that absolutely must be in the patent, they are: Point 1 (learnable mask), Point 2 (subset-specific calibration), and Point 3 (structural coupling via nesting). These three together describe the inventive step in a way that none of the prior art — including MatQuant and MatGPTQ — discloses.
+
+Point 4 establishes the structural object that Points 1-3 operate on. Point 6 covers the artifact separately, which is important for enforcement. Point 5 is the generalization that prevents design-arounds. Point 7 is a defensive position that secures the PTQ classification.
+
+Drop any of Points 1, 2, or 3 and the patent becomes vulnerable to prior art collapse. Keep all three and you have a defensible filing
+
+
+
+t
+.Here’s a single-slide proposal with tight, scannable points. Built for one screen — no fluff.
+
+Nested Sub-Lattice Calibration for Ultra-Low-Bit LLM Quantization
+
+Patent disclosure — invention summary
+
+Problem
+
+	•	Ultra-low-bit (2–2.5 bit) LLM quantization loses unacceptable quality with uniform precision
+	•	Existing mixed-precision methods use precomputed assignment + independent codebooks, requiring two-stream inference
+
+Method
+
+	•	Two-level codebook with dyadic step ratio: coarse codebook is a strict subset of fine codebook
+	•	Per-weight learnable mask assigns each weight to coarse or fine
+	•	Two projection parameters (one per level), coupled through the nesting
+	•	All three — mask, coarse projection, fine projection — jointly optimized under a single reconstruction loss
+	•	Post-training: weights frozen, no task loss, no labels, ~128 calibration samples
+
+Key inventive elements
+
+	•	Per-weight assignment as a learnable variable, not a precomputed criterion
+	•	Each projection calibrated against its assigned subset only — not against the full tensor
+	•	Gradient coupling across precision levels via the structural nesting constraint
+	•	Inference artifact collapses to single-kernel, single-buffer dequantization
+
+Closest prior art and distinction
+
+	•	MatQuant / MatGPTQ: nested integers, layer-level slicing, no per-weight learnable mask, no subset-specific scale calibration
+	•	SqueezeLLM / AWQ / PTQ1.61: precomputed per-weight precision routing, independent codebooks, two-kernel inference
+	•	Our method is none of the above — the calibration procedure and the resulting artifact both differ
+
+Outcome
+
+	•	One calibrated model, one inference kernel, one memory pass
+	•	Strictly lower reconstruction loss than any equivalent precomputed-assignment method on the same budget (by construction)
+
+This fits on one slide at standard 16:9. If you want it tighter for a verbal pitch, the four sections you must keep are Method, Key inventive elements, Distinction, and Outcome. The Problem section can be delivered Here’s an elaborated methodology section with equations. I’ve kept it technical but organized into distinct subsections so each piece of the formulation is explicit and defensible in a patent context.
+
+Methodology
+
+Nested sub-lattice calibration with joint mask-projection optimization
+
+1. Notation and setup
+
+Let ￼ denote a pre-trained weight tensor of a linear layer, and let ￼ denote a batch of input activations drawn from an unlabeled calibration set. The full-precision layer output is ￼. Quantization replaces ￼ with a discretized ￼, and the calibration objective minimizes the reconstruction error between ￼ and ￼.
+
+Weights are grouped into groups of size ￼ for codebook assignment. For each group, the procedure introduces a coarse codebook ￼ and a fine codebook ￼.
+
+2. Hierarchical codebook structure
+
+The two codebooks are defined by step sizes ￼ and ￼ satisfying the dyadic nesting constraint:
+
+\Delta_c = 2 \Delta_f
+
+The fine codebook has ￼ codewords; the coarse codebook has ￼ codewords. Specifically:
+
+\mathcal{C}_f = { k \cdot \Delta_f : k \in {-2^{b_f-1}, \ldots, 2^{b_f-1}-1} }
+
+\mathcal{C}_c = { 2j \cdot \Delta_f : j \in {-2^{b_f-2}, \ldots, 2^{b_f-2}-1} }
+
+By construction, ￼ — every coarse codeword coincides with a fine codeword. The factor-of-two relationship means a coarse index ￼ corresponds exactly to a fine index ￼, or equivalently, a fine index ￼ is also a coarse codeword if and only if its lowest-order bit is zero.
+
+3. Learnable objects
+
+The calibration procedure introduces three sets of learnable parameters per group:
+
+	•	A fine-codebook scale ￼ (continuous)
+	•	A coarse-codebook scale ￼ (continuous), structurally coupled to ￼ via ￼
+	•	A per-weight assignment logit ￼ for each weight ￼ in the group, relaxed to a continuous assignment via ￼, where ￼ is the sigmoid
+
+The interpretation: ￼ assigns weight ￼ to the coarse codebook; ￼ assigns it to the fine codebook.
+
+4. Quantization function
+
+For each weight ￼, the quantized value is a soft mixture of its coarse and fine projections during calibration:
+
+\widehat{w}_i = (1 - m_i) \cdot Q_c(w_i; s_c) + m_i \cdot Q_f(w_i; s_f)
+
+where the per-codebook quantizers are:
+
+Q_c(w_i; s_c) = s_c \cdot \text{clip}\left( \lfloor w_i / s_c \rceil, -2^{b_f-2}, 2^{b_f-2}-1 \right)
+
+Q_f(w_i; s_f) = s_f \cdot \text{clip}\left( \lfloor w_i / s_f \rceil, -2^{b_f-1}, 2^{b_f-1}-1 \right)
+
+The rounding operation ￼ uses a learnable rounding offset (continuous projection parameter at each codebook level), so the projection is differentiable through a straight-through estimator. At convergence, ￼ is hardened to ￼ for deployment.
+
+5. Block-wise reconstruction objective
+
+The calibration loss for a block (one transformer layer or sub-layer) is:
+
+\mathcal{L}_{\text{recon}} = \frac{1}{b} | \widehat{W} X - W X |_F^2
+
+where ￼ is constructed element-wise from the quantization function in Section 4. For improved sensitivity weighting, each weight’s reconstruction error is scaled by a Fisher-derived coefficient ￼ representing the squared sensitivity of the layer output to a unit perturbation in ￼:
+
+\mathcal{L}_{\text{Fisher}} = \sum_i F_i \cdot (\widehat{w}_i - w_i)^2
+
+The full objective combines reconstruction fidelity with a sparsity regularizer on the assignment mask:
+
+\mathcal{L} = \mathcal{L}_{\text{recon}} + \lambda \cdot \mathcal{R}(m)
+
+where ￼ penalizes deviation from a target fraction ￼ of weights assigned to the fine codebook (storage budget).
+
+6. Joint optimization step
+
+All three learnable objects are updated simultaneously by gradient descent on ￼:
+
+s_f \leftarrow s_f - \eta \cdot \nabla_{s_f} \mathcal{L}
+
+s_c \leftarrow s_c - \eta \cdot \nabla_{s_c} \mathcal{L} \quad \text{(coupled: } s_c = 2 s_f \text{ enforced throughout)}
+
+\alpha_i \leftarrow \alpha_i - \eta \cdot \nabla_{\alpha_i} \mathcal{L} \quad \forall i
+
+The coupling ￼ means gradients with respect to one scale propagate to the other:
+
+\nabla_{s_f} \mathcal{L} \big|_{\text{total}} = \nabla_{s_f} \mathcal{L} + 2 \cdot \nabla_{s_c} \mathcal{L}
+
+Every weight contributes gradient information to both projections, regardless of its current mask value, because the soft mixture in Section 4 means both terms are active during the forward pass.
+
+The pre-trained weights ￼ themselves are held fixed — they are not updated by gradient descent.
+
+7. Subset-specific calibration property
+
+A direct consequence of the soft-mixture formulation: at any optimization step, the gradient with respect to ￼ is dominated by weights with ￼ close to 1, and the gradient with respect to ￼ is dominated by weights with ￼ close to 0:
+
+\nabla_{s_f} \mathcal{L}_{\text{recon}} \approx \sum_i m_i \cdot \nabla_{s_f} (\widehat{w}_i - w_i)^2
+
+\nabla_{s_c} \mathcal{L}_{\text{recon}} \approx \sum_i (1 - m_i) \cdot \nabla_{s_c} (\widehat{w}_i - w_i)^2
+
+Each scale is therefore calibrated against the subset of weights currently assigned to it. As the mask evolves during optimization, the subset evolves, and the scale adapts to the changing subset — the subset and the scale co-adapt.
+
+This is structurally distinct from uniform-precision calibration, in which each scale is optimized against the full tensor with ￼ (or ￼) for all weights.
+
+8. Post-training quantization regime
+
+The procedure operates entirely within the PTQ regime:
+
+	•	Pre-trained weights ￼ remain fixed throughout (no weight updates)
+	•	Calibration uses a small unlabeled dataset (￼ sequences)
+	•	The reconstruction objective ￼ uses no task loss, no labels
+	•	Calibration runs block-by-block; no gradients flow across blocks
+	•	No end-to-end backpropagation through the network
+
+9. Generalization to N-level hierarchies
+
+The procedure extends to ￼ codebook levels with step sizes ￼ satisfying ￼. The assignment mask becomes multi-valued, ￼ (the simplex over ￼ levels), implemented via a softmax over level logits. The quantization function generalizes to:
+
+\widehat{w}_i = \sum_{l=1}^{L} m_i^{(l)} \cdot Q_l(w_i; s_l)
+
+with ￼ enforcing the nesting across all levels. Joint optimization runs over all scales and all assignment logits under the same single reconstruction loss.
+
+10. Inference artifact
+
+After calibration, the assignment mask is hardened: ￼. Each weight is stored as a fine-codebook index:
+
+\text{idx}_i = \begin{cases} 2 \cdot \lfloor w_i / s_c \rceil & \text{if } m_i = 0 \text{ (coarse-assigned)} \ \lfloor w_i / s_f \rceil & \text{if } m_i = 1 \text{ (fine-assigned)} \end{cases}
+
+Coarse-assigned indices are even integers in the fine-codebook range — their lowest-order bit is structurally zero. Dequantization at inference is uniform across all weights:
+
+\widehat{w}_i = s_f \cdot \text{idx}_i
+
+A single kernel processes the entire tensor with one memory traversal, no branching on assignment, and no accumulation across precision streams.
+
+Notes on the equations
+
+The straight-through estimator for ￼ in Section 4 follows standard PTQ practice (used in AdaRound, TesseraQ, OmniQuant). You can choose to spell it out in the patent or treat it as a known mechanism — I’d recommend spelling it out for clarity.
+
+The coupling ￼ in Section 6 can equivalently be expressed as a single scale parameter ￼ with ￼ derived from it. Some implementations might prefer the single-parameter form for cleaner gradient flow; both are equivalent and patentably the same.
+
+The Fisher coefficient ￼ in Section 5 can be diagonal Fisher (from SqueezeLLM) or block-diagonal Hessian (from BoA/Qronos). The patent doesn’t need to fix one specific source — claim 4 in the earlier draft was deliberately written to cover any Fisher-like sensitivity weighting.
+
+Section 9 (N-level generalization) matters for patent scope. Even if your experiments only use two levels, the patent should cover the general formulation. The notation here is direct and reusable.
+
+Section 10’s storage scheme — storing all weights as fine-codebook indices, with coarse weights having structurally zero LSBs — is the basis of your single-kernel inference claim. If you choose to store coarse weights compactly instead (one fewer bit per coarse weight), the single-kernel claim weakens. Worth a deliberate choice and a sentence of justification.
+
+Tell me if you want any subsection expanded, the notation adjusted, or specific equations replaced with alternatives (e.g., a different formulation of the soft mixture or a different sparsity penalty).
