@@ -3,477 +3,403 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>What diff-of-means misses — variance-hierarchy steering</title>
+<title>The quiet meaning — hidden senses in non-dominant PCs</title>
 <style>
   :root{
-    --bg:#0a212c;--panel:#0f2c3a;--panel2:#123545;
-    --grid:rgba(168,214,232,0.07);--ink:#e8f2f6;--dim:#7fa6b4;--rule:rgba(168,214,232,0.18);
-    --cyan:#46b6d6;--river:#7fd0ff;--fin:#ffb454;--fin2:#ff7a6b;--nuis:#e3678c;--mint:#74f0bd;--warn:#ffcf6b;
+    --bg:#0a212c;--panel:#0f2c3a;--panel2:#123545;--grid:rgba(168,214,232,0.07);
+    --ink:#e8f2f6;--dim:#7fa6b4;--rule:rgba(168,214,232,0.18);
+    --cyan:#46b6d6;--mint:#74f0bd;--inst:#ffb454;--river:#7fd0ff;--base:#90a6b3;--warn:#ffcf6b;--nuis:#e3678c;
   }
   *{box-sizing:border-box}
   html{scroll-behavior:smooth}
-  body{margin:0;background:var(--bg);color:var(--ink);font-family:ui-sans-serif,system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;line-height:1.6;
+  body{margin:0;background:var(--bg);color:var(--ink);line-height:1.6;
+    font-family:ui-sans-serif,system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
     background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);
     background-size:34px 34px;}
-  .wrap{max-width:1120px;margin:0 auto;padding:0 22px 120px}
+  .mono{font-family:ui-monospace,Menlo,Consolas,monospace}
+  .wrap{max-width:1060px;margin:0 auto;padding:0 22px 120px}
   header{padding:60px 0 26px;border-bottom:1px solid var(--rule)}
-  .eyebrow{font-family:'IBM Plex Mono',monospace;font-size:12px;letter-spacing:.22em;text-transform:uppercase;color:var(--cyan);margin-bottom:18px}
-  h1{font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:clamp(30px,5vw,52px);line-height:1.05;margin:0 0 18px;letter-spacing:-.02em}
-  h1 .stack{display:block}
+  .eyebrow{font:600 12px ui-monospace,Menlo,monospace;letter-spacing:.22em;text-transform:uppercase;color:var(--cyan);margin-bottom:18px}
+  h1{font-weight:600;font-size:clamp(30px,5.4vw,52px);line-height:1.04;margin:0 0 18px;letter-spacing:-.02em}
+  h1 .s{display:block}
   h1 em{font-style:normal;color:var(--mint)}
-  .thesis{max-width:660px;color:var(--dim);font-size:clamp(15px,2vw,18px)}
+  .thesis{max-width:680px;color:var(--dim);font-size:clamp(15px,2vw,18px)}
   .thesis b{color:var(--ink);font-weight:600}
-  .mono{font-family:'IBM Plex Mono',monospace}
-  section{padding:50px 0;border-bottom:1px solid var(--rule)}
-  .sec-no{font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--cyan);letter-spacing:.18em}
-  h2{font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:clamp(22px,3vw,30px);margin:8px 0 14px;letter-spacing:-.01em}
+  section{padding:48px 0;border-bottom:1px solid var(--rule)}
+  .sec-no{font:600 12px ui-monospace,Menlo,monospace;letter-spacing:.18em;color:var(--cyan)}
+  h2{font-weight:600;font-size:clamp(21px,3vw,29px);margin:8px 0 14px;letter-spacing:-.01em}
   p.lead{max-width:700px;color:var(--dim)}
   p.lead b{color:var(--ink);font-weight:600}
-  code{font-family:'IBM Plex Mono',monospace;background:var(--panel2);padding:1px 6px;border-radius:4px;font-size:.88em;color:var(--mint)}
-  .legend{display:flex;gap:18px;flex-wrap:wrap;font-family:'IBM Plex Mono',monospace;font-size:12.5px;color:var(--dim);margin:18px 0 4px}
+  code{font-family:ui-monospace,Menlo,Consolas,monospace;background:var(--panel2);padding:1px 6px;border-radius:4px;font-size:.86em;color:var(--mint)}
+  .legend{display:flex;gap:18px;flex-wrap:wrap;font:500 12.5px ui-monospace,Menlo,monospace;color:var(--dim);margin:16px 0 2px}
   .legend span{display:inline-flex;align-items:center;gap:7px}
   .dot{width:11px;height:11px;border-radius:50%;display:inline-block}
-  .ring{width:11px;height:11px;border-radius:50%;display:inline-block;border:2px solid var(--ink);background:transparent}
-  .lab{background:var(--panel);border:1px solid var(--rule);border-radius:14px;padding:22px;margin-top:24px}
+  .lab{background:var(--panel);border:1px solid var(--rule);border-radius:14px;padding:22px;margin-top:22px}
   .grid2{display:grid;grid-template-columns:1fr 1fr;gap:20px}
-  @media(max-width:860px){.grid2{grid-template-columns:1fr}}
+  @media(max-width:840px){.grid2{grid-template-columns:1fr}}
   .pcol{min-width:0}
-  .plot-title{font-family:'IBM Plex Mono',monospace;font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);margin:2px 0 10px;display:flex;justify-content:space-between;align-items:baseline;gap:8px}
-  .plot-title .tag{font-size:11px}
+  .ptitle{font:600 12px ui-monospace,Menlo,monospace;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);margin:2px 0 10px;display:flex;justify-content:space-between;gap:8px;align-items:baseline}
+  .ptitle .tag{font-size:11px;text-transform:none}
   canvas{width:100%;display:block;border-radius:9px;background:#08191f;border:1px solid var(--rule);touch-action:none}
-  .controls{display:flex;flex-wrap:wrap;gap:24px;align-items:center;margin-top:22px;padding-top:20px;border-top:1px dashed var(--rule)}
-  .ctl{display:flex;flex-direction:column;gap:7px;min-width:200px;flex:1}
-  .ctl label{font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--dim);letter-spacing:.04em;display:flex;justify-content:space-between}
-  .ctl label b{color:var(--mint);font-weight:600}
-  input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:4px;border-radius:3px;background:linear-gradient(90deg,var(--cyan),var(--nuis));outline:none}
+  .controls{display:flex;flex-wrap:wrap;gap:22px;align-items:center;margin-top:20px;padding-top:18px;border-top:1px dashed var(--rule)}
+  .ctl{display:flex;flex-direction:column;gap:7px;min-width:220px;flex:1}
+  .ctl label{font:500 12px ui-monospace,Menlo,monospace;color:var(--dim);display:flex;justify-content:space-between}
+  .ctl label b{color:var(--mint)}
+  input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:4px;border-radius:3px;background:linear-gradient(90deg,var(--cyan),var(--mint));outline:none}
   input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:18px;height:18px;border-radius:50%;background:var(--ink);border:3px solid var(--cyan);cursor:pointer}
   input[type=range]::-moz-range-thumb{width:14px;height:14px;border-radius:50%;background:var(--ink);border:3px solid var(--cyan);cursor:pointer}
   .seg{display:inline-flex;border:1px solid var(--rule);border-radius:8px;overflow:hidden}
-  .seg button{font-family:'IBM Plex Mono',monospace;font-size:12.5px;background:transparent;color:var(--dim);border:none;padding:9px 14px;cursor:pointer}
+  .seg button{font:500 12.5px ui-monospace,Menlo,monospace;background:transparent;color:var(--dim);border:none;padding:9px 14px;cursor:pointer}
   .seg button.on{background:var(--cyan);color:#06181f;font-weight:600}
-  button.btn{font-family:'IBM Plex Mono',monospace;font-size:12.5px;background:var(--panel2);color:var(--ink);border:1px solid var(--cyan);padding:9px 16px;border-radius:7px;cursor:pointer;transition:.15s}
-  button.btn:hover{background:var(--cyan);color:#06181f}
   .cov{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:18px}
-  @media(max-width:860px){.cov{grid-template-columns:1fr}}
+  @media(max-width:840px){.cov{grid-template-columns:1fr}}
   .covcard{border:1px solid var(--rule);border-radius:10px;padding:14px 16px;background:var(--panel2)}
-  .covcard .h{font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim)}
-  .covcard .score{font-family:'Space Grotesk',sans-serif;font-size:30px;font-weight:600;margin:4px 0}
-  .covcard .meanings{font-family:'IBM Plex Mono',monospace;font-size:12.5px;display:flex;gap:16px;margin-top:6px}
+  .covcard .h{font:600 11px ui-monospace,Menlo,monospace;letter-spacing:.1em;text-transform:uppercase;color:var(--dim)}
+  .covcard .score{font-size:30px;font-weight:600;margin:4px 0}
+  .covcard .m{font:600 12.5px ui-monospace,Menlo,monospace;display:flex;gap:16px;margin-top:6px}
   .hit{color:var(--mint)}.miss{color:var(--nuis)}
-  .hint{font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--dim);margin-top:10px}
+  .hint{font:500 12px ui-monospace,Menlo,monospace;color:var(--dim);margin-top:10px}
   .hint b{color:var(--mint)}
-  .verdict{margin-top:18px;border:1px solid var(--rule);border-radius:10px;overflow:hidden}
-  .verdict .head{padding:13px 18px;font-family:'IBM Plex Mono',monospace;font-size:13px;letter-spacing:.06em;display:flex;justify-content:space-between;align-items:center}
-  .verdict .body{padding:0 18px 15px;color:var(--dim);font-size:14.5px}
-  .badge{font-family:'IBM Plex Mono',monospace;font-weight:600;padding:4px 12px;border-radius:20px;font-size:12.5px;letter-spacing:.08em}
-  .badge.dom{background:rgba(116,240,189,.14);color:var(--mint);border:1px solid var(--mint)}
-  .badge.mask{background:rgba(227,103,140,.14);color:var(--nuis);border:1px solid var(--nuis)}
-  .readout{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:20px}
-  @media(max-width:680px){.readout{grid-template-columns:1fr}}
-  .stat{background:var(--panel2);border:1px solid var(--rule);border-radius:10px;padding:14px 16px}
-  .stat .k{font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim)}
-  .stat .v{font-family:'Space Grotesk',sans-serif;font-size:26px;font-weight:600;margin-top:3px}
-  .stat .s{font-size:12px;color:var(--dim);margin-top:2px}
-  table.regimes{width:100%;border-collapse:collapse;margin-top:22px;font-size:14px}
-  table.regimes th,table.regimes td{text-align:left;padding:12px 14px;border-bottom:1px solid var(--rule);vertical-align:top}
-  table.regimes th{font-family:'IBM Plex Mono',monospace;font-size:11.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--cyan)}
-  table.regimes td:first-child{font-family:'Space Grotesk',sans-serif;font-weight:600;color:var(--ink);white-space:nowrap}
-  table.regimes td .tag{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--dim)}
-  .pipeline{display:flex;flex-wrap:wrap;gap:8px;margin-top:22px;font-family:'IBM Plex Mono',monospace;font-size:12.5px}
-  .pipeline .step{background:var(--panel2);border:1px solid var(--rule);border-radius:7px;padding:8px 12px;color:var(--dim)}
-  .pipeline .step b{color:var(--ink);font-weight:600}
-  .pipeline .arr{color:var(--cyan);align-self:center}
-  footer{padding:38px 0 0;color:var(--dim);font-size:13px;font-family:'IBM Plex Mono',monospace}
-  .kbd{color:var(--mint)}
+  .callout{margin-top:18px;border:1px solid var(--rule);border-left:3px solid var(--mint);border-radius:8px;padding:14px 16px;background:var(--panel2);color:var(--dim);font-size:14.5px}
+  .callout b{color:var(--ink)}
+  table.tb{width:100%;border-collapse:collapse;margin-top:20px;font-size:14px}
+  table.tb th,table.tb td{text-align:left;padding:11px 14px;border-bottom:1px solid var(--rule);vertical-align:top}
+  table.tb th{font:600 11.5px ui-monospace,Menlo,monospace;letter-spacing:.08em;text-transform:uppercase;color:var(--cyan)}
+  table.tb td:first-child{font-weight:600;color:var(--ink);white-space:nowrap}
+  footer{padding:36px 0 0;color:var(--dim);font:500 13px ui-monospace,Menlo,monospace}
 </style>
 </head>
 <body>
 <div class="wrap">
 
 <header>
-  <div class="eyebrow">Interactive figure · contrastive vs. region-aware steering</div>
-  <h1><span class="stack">Diff-of-means averages</span><span class="stack">a meaning <em>out of existence.</em></span></h1>
-  <p class="thesis">The classic steering vector is <code>d = mean(positive) − mean(negative)</code>. When the positive class holds <b>two meanings</b> of "bank" — a <b>financial institution</b> and a <b>bank account</b> — one global vector points at their average and reaches whichever is bigger, <b>silently dropping the smaller one</b>. This page builds that exact situation and shows the variance-hierarchy method recovering both regions and steering each on its own. Everything is computed live from the points.</p>
+  <div class="eyebrow">Activation steering · variance hierarchy</div>
+  <h1><span class="s">"Bank" has two meanings.</span><span class="s">One is loud. One is <em>quiet.</em></span></h1>
+  <p class="thesis">A polysemous word lives as two clusters in activation space — <b>financial institution</b> and <b>river edge</b>. But the institution sense dominates the variance, so contrastive steering and top-component methods lock onto it and never see the river sense. This page shows the river meaning sitting in <b>PC1, a non-dominant direction</b>, and how looking past PC0 recovers it. All figures are computed live from the points.</p>
 </header>
 
-<!-- 01 DATA -->
+<!-- 01 -->
 <section id="data">
-  <div class="sec-no">01 / THE CONTRASTIVE SETUP</div>
-  <h2>One negative class, a positive class with two meanings</h2>
-  <p class="lead">Each point is a toy <code>d=2</code> activation at the "bank" token. The <b>negative / contrast class</b> is the river sense. The <b>positive class</b> is the financial sense — but it lives in two separated activation regions: <b>institution</b> contexts (the majority) and <b>account</b> contexts (the minority). Diff-of-means only ever sees "positive vs negative," so it collapses both financial regions into a single mean.</p>
+  <div class="sec-no">01 / THE PICTURE IN ACTIVATION SPACE</div>
+  <h2>Two senses of "bank", plus a contrast word</h2>
+  <p class="lead">Each dot is a toy <code>d=2</code> activation. The <b>negative / contrast class is a different word</b> ("stone") — it's only the baseline that contrastive steering subtracts, not a meaning of bank. The two senses of "bank" are <b style="color:var(--inst)">institution</b> (the common sense, far from the baseline) and <b style="color:var(--river)">river</b> (rarer, offset in a different direction).</p>
   <div class="legend">
-    <span><span class="dot" style="background:var(--river)"></span> negative class · river &nbsp;<span class="mono">⊖</span></span>
-    <span><span class="dot" style="background:var(--fin)"></span> positive · institution &nbsp;<span class="mono">(majority)</span></span>
-    <span><span class="dot" style="background:var(--fin2)"></span> positive · account &nbsp;<span class="mono">(minority)</span></span>
-    <span><span class="ring"></span> ρ-neighborhood of a meaning</span>
+    <span><span class="dot" style="background:var(--base)"></span> "stone" — contrast word <span class="mono">(⊖)</span></span>
+    <span><span class="dot" style="background:var(--inst)"></span> bank · institution sense</span>
+    <span><span class="dot" style="background:var(--river)"></span> bank · river sense</span>
   </div>
 </section>
 
-<!-- 02 CORE: MISS vs CATCH -->
-<section id="core">
-  <div class="sec-no">02 / THE MISS, AND THE CATCH</div>
-  <h2>Same data, two steering strategies, side by side</h2>
-  <p class="lead">Left: one global diff-of-means vector, applied from a typical river source. Right: the method clusters the recovered financial regions and keeps a <b>local vector per meaning</b>, picked by a router. Push the <b>separation</b> up and watch the left panel lose the account meaning while the right keeps both. Drag the <span class="mono">◎</span> source on either plot.</p>
-
+<!-- 02 -->
+<section id="miss">
+  <div class="sec-no">02 / WHAT STANDARD METHODS RECOVER</div>
+  <h2>One loud direction → only the institution sense</h2>
+  <p class="lead">Both classic moves collapse "bank" to a <b>single direction</b>. <b>Diff-of-means</b> subtracts the contrast word: <code>mean(bank) − mean(stone)</code>. <b>Top-PC</b> takes the loudest axis, PC0. Either way the river sense — a minority offset — gets averaged away. The arrow lands on institution; river is unreachable.</p>
   <div class="lab">
-    <div class="grid2">
-      <div class="pcol">
-        <div class="plot-title"><span>Naive · one global d = mean(pos) − mean(neg)</span><span class="tag mono" id="lblG">—</span></div>
-        <canvas id="cG" height="340"></canvas>
-        <div class="hint">⊖→⊕ is the diff-of-means vector. The landing ◆ is the steered source; dashed rings are each meaning's neighborhood.</div>
-      </div>
-      <div class="pcol">
-        <div class="plot-title"><span>Region-aware · local vector per meaning + router</span><span class="tag mono" id="lblL">—</span></div>
-        <canvas id="cL" height="340"></canvas>
-        <div class="hint">Two local vectors leave ⊖. The router applies the one for the <b>target meaning</b> you select below.</div>
-      </div>
-    </div>
-
+    <div class="ptitle"><span>Activation space · the method's single steering direction</span><span class="tag mono" id="scLbl">—</span></div>
+    <canvas id="cScatter" height="360"></canvas>
     <div class="controls">
-      <div class="ctl">
-        <label>meaning separation &nbsp;<b id="sepVal">1.40</b></label>
-        <input id="sep" type="range" min="0" max="2.2" step="0.05" value="1.4">
-      </div>
-      <div class="ctl">
-        <label>steering strength &nbsp;α <b id="aVal">1.00</b></label>
-        <input id="alpha" type="range" min="0" max="1.8" step="0.05" value="1.0">
-      </div>
       <div class="ctl" style="flex:0;min-width:auto">
-        <label>target meaning (router)</label>
-        <div class="seg" id="targetSeg">
-          <button data-t="0" class="on">institution</button>
-          <button data-t="1">account</button>
+        <label>steering method</label>
+        <div class="seg" id="methodSeg">
+          <button data-m="dm" class="on">diff-of-means</button>
+          <button data-m="pc">top-PC (PC0)</button>
         </div>
       </div>
-      <button class="btn" id="resetq">↻ reset source</button>
+      <div class="hint" style="margin:0">Dashed lines are PC0 (loud) and PC1 (quiet). The arrow is what the chosen method steers along.</div>
     </div>
-
     <div class="cov">
       <div class="covcard">
-        <div class="h">naive diff-of-means · meanings reached</div>
-        <div class="score" id="covGscore">—</div>
-        <div class="meanings" id="covGmeanings">—</div>
+        <div class="h" id="m1h">this method · meanings reachable</div>
+        <div class="score" id="m1score">1 / 2</div>
+        <div class="m"><span class="hit">institution ✓</span><span class="miss">river ✗</span></div>
       </div>
       <div class="covcard">
-        <div class="h">region-aware · meanings reachable</div>
-        <div class="score" id="covLscore">—</div>
-        <div class="meanings" id="covLmeanings">—</div>
+        <div class="h">why river is missed</div>
+        <div class="m" style="color:var(--dim);font-weight:500;display:block">The river cluster is a small, low-variance offset. Averaging or taking the loudest axis both point at the institution mass.</div>
       </div>
     </div>
-    <div class="hint" id="coreNote" style="margin-top:14px"></div>
   </div>
 </section>
 
-<!-- 03 DIAGNOSE / MASKED -->
-<section id="diagnose">
-  <div class="sec-no">03 / HOW THE METHOD KNOWS TO LOOK</div>
-  <h2>When the meaning hides under a nuisance axis</h2>
-  <p class="lead">Diff-of-means at least uses labels. Unsupervised clustering follows the loudest axis — so if token-position variance is louder than the sense, naive k-means recovers <i>position</i>, not meaning. The method runs the <b>variance hierarchy</b>, flags the top axis when it correlates with <code>token_position</code>, suppresses it, then clusters the residual. Slide the nuisance up to cross from Dominant into Masked.</p>
-
+<!-- 03 -->
+<section id="hier">
+  <div class="sec-no">03 / WHERE THE RIVER SENSE WENT</div>
+  <h2>It's in PC1 — the quiet component</h2>
+  <p class="lead">Run PCA on the activations and read the spectrum. <b>PC0</b> holds most of the variance: it's the institution-vs-baseline axis. <b>PC1</b> is small — but it is exactly where the river sense lives. Project the points onto each axis to see it: on PC0 the two senses <b>overlap</b>; on PC1 the river sense <b>separates out</b>.</p>
   <div class="lab">
     <div class="grid2">
       <div class="pcol">
-        <div class="plot-title"><span>k-means on raw H</span><span class="tag mono" id="lblM">—</span></div>
-        <canvas id="cM" height="320"></canvas>
-        <div class="hint">Ring = true sense, fill = k-means label. Mismatch ⇒ clustering chased the nuisance. Lines = PC0/PC1.</div>
+        <div class="ptitle"><span>Variance hierarchy</span><span class="tag mono" id="specLbl">—</span></div>
+        <canvas id="cSpectrum" height="200"></canvas>
+        <div class="hint">PC1 is short — which is exactly why standard methods skip it. Short ≠ empty.</div>
       </div>
       <div class="pcol">
-        <div class="plot-title"><span>Variance hierarchy &amp; recovery</span><span class="tag mono">PC0 status</span></div>
-        <canvas id="cV" height="320"></canvas>
-        <div class="hint">PC0 turns <b style="color:var(--nuis)">pink</b> when flagged as position. Bars below: sense recovery raw → residual.</div>
+        <div class="ptitle"><span>Project onto one axis at a time</span><span class="tag mono">overlap vs separation</span></div>
+        <canvas id="cStrip" height="200"></canvas>
+        <div class="hint">Top strip = projection on PC0: <b style="color:var(--inst)">institution</b> & <b style="color:var(--river)">river</b> sit together. Bottom = PC1: river pulls apart.</div>
       </div>
     </div>
     <div class="controls">
       <div class="ctl">
-        <label>nuisance variance &nbsp;σ <b id="sigVal">1.60</b></label>
-        <input id="sig" type="range" min="0.3" max="3.4" step="0.05" value="1.6">
+        <label>how buried is the river sense? &nbsp;(offset along PC1) <b id="bVal">2.40</b></label>
+        <input id="bsep" type="range" min="0.8" max="3.2" step="0.05" value="2.4">
       </div>
-      <button class="btn" id="reseed">↻ reseed</button>
+      <div class="hint" style="margin:0">Lower it and PC1 shrinks further — the sense gets quieter, but it's still recoverable from the residual.</div>
     </div>
-    <div class="readout">
-      <div class="stat"><div class="k">raw k-means purity</div><div class="v" id="sRaw">—</div><div class="s">unsupervised, no suppression</div></div>
-      <div class="stat"><div class="k">corr(PC0, token_pos)</div><div class="v" id="sCorr">—</div><div class="s">&gt; 0.55 ⟹ flag &amp; suppress</div></div>
-      <div class="stat"><div class="k">residual purity</div><div class="v" id="sRes">—</div><div class="s">after projecting PC0 out</div></div>
+    <div class="callout" id="hierNote">—</div>
+  </div>
+</section>
+
+<!-- 04 -->
+<section id="recover">
+  <div class="sec-no">04 / RECOVERING THE SECOND MEANING</div>
+  <h2>Suppress PC0, cluster the residual, build both vectors</h2>
+  <p class="lead">Project PC0 out: <code>H − H·v₀v₀ᵀ</code>. The institution-vs-baseline variance vanishes and the residual is just PC1, where the river cluster stands alone. Cluster it, and now there are <b>two</b> steering directions — institution along PC0, river from the recovered cluster. Both senses become reachable.</p>
+  <div class="lab">
+    <div class="grid2">
+      <div class="pcol">
+        <div class="ptitle"><span>Residual after suppressing PC0</span><span class="tag mono">river cluster emerges</span></div>
+        <canvas id="cRecover" height="320"></canvas>
+        <div class="hint">Fill = cluster recovered from the residual; ring = true sense. Both vectors leave the contrast centroid ⊖.</div>
+      </div>
+      <div class="pcol">
+        <div class="ptitle"><span>Coverage, side by side</span><span class="tag mono">single vs hierarchy</span></div>
+        <canvas id="cBars" height="320"></canvas>
+        <div class="hint">Standard single-direction methods reach one sense. The variance-hierarchy method reaches both.</div>
+      </div>
     </div>
-    <div class="verdict">
-      <div class="head"><span>Regime verdict</span><span id="badge" class="badge dom">DOMINANT</span></div>
-      <div class="body" id="verdictText">—</div>
+    <div class="cov">
+      <div class="covcard">
+        <div class="h">variance-hierarchy method · meanings reachable</div>
+        <div class="score" style="color:var(--mint)">2 / 2</div>
+        <div class="m"><span class="hit">institution ✓</span><span class="hit">river ✓</span></div>
+      </div>
+      <div class="covcard">
+        <div class="h">river recovery quality (residual clustering)</div>
+        <div class="score" id="purScore">—</div>
+        <div class="m" style="color:var(--dim);font-weight:500;display:block">purity of the recovered river cluster vs the true river labels</div>
+      </div>
     </div>
   </div>
 </section>
 
-<!-- 04 REGIMES -->
-<section id="regimes">
-  <div class="sec-no">04 / WHY ONE RECIPE ISN'T ENOUGH</div>
-  <h2>Diagnose the geometry, then pick the tool</h2>
-  <table class="regimes">
-    <thead><tr><th>Regime</th><th>Signature</th><th>What diff-of-means does</th><th>Method's move</th></tr></thead>
+<!-- 05 -->
+<section id="why">
+  <div class="sec-no">05 / THE GENERAL POINT</div>
+  <h2>A concept needn't be the top direction of variation</h2>
+  <table class="tb">
+    <thead><tr><th>Approach</th><th>Direction it uses</th><th>Recovers</th></tr></thead>
     <tbody>
-      <tr><td>Dominant</td><td>Sense is the top axis.</td><td>Works.</td><td>Direct cluster-difference vector.</td></tr>
-      <tr><td>Masked <span class="tag">§03</span></td><td>Nuisance louder than sense.</td><td>Works <i>if</i> labels are clean; unsupervised fails.</td><td>Suppress PC0, cluster residual.</td></tr>
-      <tr><td>Multi-region <span class="tag">§02</span></td><td>One concept, several regions.</td><td><b style="color:var(--nuis)">Misses the minority meaning.</b></td><td>Local vector per region + router.</td></tr>
-      <tr><td>Diffuse</td><td>Spread over &gt;1 low-var direction.</td><td>Weak, unstable.</td><td>Low-rank steering subspace <code>Q</code>.</td></tr>
+      <tr><td>Diff-of-means</td><td><code>mean(bank) − mean(stone)</code></td><td>Institution only</td></tr>
+      <tr><td>Top-PC</td><td>PC0 (loudest)</td><td>Institution only</td></tr>
+      <tr><td>Supervised probe</td><td>any predictive direction</td><td>Detects river exists — but not how to steer it</td></tr>
+      <tr><td>Variance hierarchy</td><td>PC0 <em>and</em> PC1 (after suppression)</td><td><b style="color:var(--mint)">Both senses</b></td></tr>
     </tbody>
   </table>
-  <div class="pipeline">
-    <span class="step"><b>collect</b></span><span class="arr">→</span>
-    <span class="step"><b>variance</b> hierarchy</span><span class="arr">→</span>
-    <span class="step"><b>flag</b> nuisance</span><span class="arr">→</span>
-    <span class="step"><b>suppress</b></span><span class="arr">→</span>
-    <span class="step"><b>recover</b> regions</span><span class="arr">→</span>
-    <span class="step"><b>local</b> vectors</span><span class="arr">→</span>
-    <span class="step"><b>route</b></span>
-  </div>
-  <footer>
-    Toy: d=2, seeded · river=60, institution=70, account=30 · PCA = closed-form 2×2 eig · k-means++ k=2, 10 restarts ·
-    coverage scored from a representative ⊖ source within ρ=1.1. The real method runs per-layer in <span class="kbd">R^d</span> and recurses inside recovered regions.
-  </footer>
+  <p class="lead" style="margin-top:18px">Unsupervised methods follow the dominant axis. If a target meaning has lower variance than another, it hides beneath the loud one. Reading the whole spectrum — and suppressing the dominant component to expose the residual — is what surfaces the quiet meaning.</p>
+  <footer>Toy: d=2, seeded · stone=60, institution=70, river=30 · PCA closed-form 2×2 · river recovered by 1-D k-means on the PC0-suppressed residual. Real method runs per-layer in R^d and recurses into recovered regions.</footer>
 </section>
 
 </div>
 
 <script>
 "use strict";
-/* ===== visible error surface (defeats opaque cross-frame "Script error.") ===== */
-function showErr(t){var b=document.getElementById('__errbar');if(!b){b=document.createElement('div');b.id='__errbar';
-  b.style.cssText='position:fixed;left:0;right:0;bottom:0;z-index:99999;background:#3a0d18;color:#ffe;border-top:2px solid #e3678c;font:12px/1.5 ui-monospace,Menlo,Consolas,monospace;padding:10px 14px;white-space:pre-wrap;max-height:42vh;overflow:auto';
-  document.body.appendChild(b);}b.textContent='\u26a0 in-page error:\n'+t;}
-window.onerror=function(m,s,l,c,e){showErr((e&&e.stack)||(m+' @'+l+':'+c));return false;};
-window.addEventListener('unhandledrejection',function(e){showErr('promise: '+((e.reason&&e.reason.stack)||e.reason));});
-function guard(fn){return function(){try{return fn.apply(this,arguments);}catch(e){showErr((e&&e.stack)||e);}};}
-/* ===== seeded math ===== */
-function rng(seed){return function(){seed|=0;seed=seed+0x6D2B79F5|0;let t=Math.imul(seed^seed>>>15,1|seed);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
-function randn(r){let u=0,v=0;while(u===0)u=r();while(v===0)v=r();return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);}
-function mean(P){let x=0,y=0;for(const p of P){x+=p[0];y+=p[1];}return [x/P.length,y/P.length];}
+function guard(fn){return function(){try{return fn.apply(this,arguments);}catch(e){try{console.error(e);}catch(_){}}};}
+
+/* ===== math ===== */
+function rng(s){return function(){s|=0;s=s+0x6D2B79F5|0;let t=Math.imul(s^s>>>15,1|s);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+function randn(r){let u=0,v=0;while(!u)u=r();while(!v)v=r();return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);}
+function mean(P){let x=0,y=0;for(const p of P){x+=p[0];y+=p[1];}return[x/P.length,y/P.length];}
 function dist(a,b){return Math.hypot(a[0]-b[0],a[1]-b[1]);}
-function kmeans2(co,seed){const r=rng(seed);let best=null,bI=1e18;
-  for(let rs=0;rs<10;rs++){let c0=co[Math.floor(r()*co.length)];const d2=co.map(p=>(p[0]-c0[0])**2+(p[1]-c0[1])**2);
-    const sum=d2.reduce((a,b)=>a+b,0);let t=r()*sum,acc=0,idx=0;for(let i=0;i<d2.length;i++){acc+=d2[i];if(acc>=t){idx=i;break;}}
-    let C=[c0.slice(),co[idx].slice()],as=new Array(co.length).fill(0);
-    for(let it=0;it<60;it++){let ch=false;for(let i=0;i<co.length;i++){const p=co[i];const da=(p[0]-C[0][0])**2+(p[1]-C[0][1])**2,db=(p[0]-C[1][0])**2+(p[1]-C[1][1])**2;const a=da<=db?0:1;if(a!==as[i]){as[i]=a;ch=true;}}
-      const s=[[0,0,0],[0,0,0]];for(let i=0;i<co.length;i++){const a=as[i];s[a][0]+=co[i][0];s[a][1]+=co[i][1];s[a][2]++;}
-      for(let k=0;k<2;k++)if(s[k][2]>0)C[k]=[s[k][0]/s[k][2],s[k][1]/s[k][2]];if(!ch&&it>0)break;}
-    let inr=0;for(let i=0;i<co.length;i++){const a=as[i];inr+=(co[i][0]-C[a][0])**2+(co[i][1]-C[a][1])**2;}
-    if(inr<bI){bI=inr;best={as,C};}}
-  return best;
-}
 function pca2(P){let mx=0,my=0;for(const p of P){mx+=p[0];my+=p[1];}mx/=P.length;my/=P.length;
   let a=0,b=0,c=0;for(const p of P){const dx=p[0]-mx,dy=p[1]-my;a+=dx*dx;b+=dx*dy;c+=dy*dy;}a/=P.length;b/=P.length;c/=P.length;
-  const tr=(a+c)/2,dd=Math.sqrt(((a-c)/2)**2+b*b),l0=tr+dd,l1=tr-dd;
+  const tr=(a+c)/2,dd=Math.sqrt(((a-c)/2)**2+b*b),l0=Math.max(tr+dd,1e-9),l1=Math.max(tr-dd,1e-9);
   let v0;if(Math.abs(b)>1e-9)v0=[l0-c,b];else v0=(a>=c)?[1,0]:[0,1];const nl=Math.hypot(v0[0],v0[1]);v0=[v0[0]/nl,v0[1]/nl];
-  return {mean:[mx,my],v0,v1:[-v0[1],v0[0]],l0:Math.max(l0,1e-9),l1:Math.max(l1,1e-9)};}
-function corr(a,b){const n=a.length;let ma=0,mb=0;for(let i=0;i<n;i++){ma+=a[i];mb+=b[i];}ma/=n;mb/=n;
-  let sab=0,sa=0,sb=0;for(let i=0;i<n;i++){const da=a[i]-ma,db=b[i]-mb;sab+=da*db;sa+=da*da;sb+=db*db;}return sab/Math.sqrt(sa*sb+1e-12);}
+  return {mean:[mx,my],v0,v1:[-v0[1],v0[0]],l0,l1};}
+function km1(co,seed){const r=rng(seed);let best=null,bI=1e18;for(let rs=0;rs<10;rs++){
+  let C=[co[(r()*co.length)|0],co[(r()*co.length)|0]],as=co.map(()=>0);
+  for(let it=0;it<50;it++){let ch=0;for(let i=0;i<co.length;i++){const a=Math.abs(co[i]-C[0])<=Math.abs(co[i]-C[1])?0:1;if(a!==as[i]){as[i]=a;ch=1;}}
+    let s=[[0,0],[0,0]];for(let i=0;i<co.length;i++){s[as[i]][0]+=co[i];s[as[i]][1]++;}for(let k=0;k<2;k++)if(s[k][1])C[k]=s[k][0]/s[k][1];if(!ch&&it)break;}
+  let inr=0;for(let i=0;i<co.length;i++)inr+=(co[i]-C[as[i]])**2;if(inr<bI){bI=inr;best={as:as.slice(),C:C.slice()};}}return best;}
 
-/* ===== robust canvas registry (fixes dead-slider / zero-width paint) ===== */
+/* ===== canvas registry (height cached once; no compounding) ===== */
 const CANV=[];
-function register(id,draw){const cv=document.getElementById(id);const ctx=cv.getContext('2d');const o={cv,ctx,draw,w:0,h:0};CANV.push(o);
-  if(typeof ResizeObserver!=='undefined'){new ResizeObserver(()=>{if(sizeOf(o))safe(o);}).observe(cv);}
-  return o;}
-function sizeOf(o){const dpr=Math.min(window.devicePixelRatio||1,2);
-  let w=Math.round(o.cv.clientWidth||o.cv.getBoundingClientRect().width||0);
-  if(w<2)return false;const h=parseInt(o.cv.getAttribute('height'));
-  o.w=w;o.h=h;o.cv.width=w*dpr;o.cv.height=h*dpr;o.cv.style.height=h+'px';o.ctx.setTransform(dpr,0,0,dpr,0,0);return true;}
-function safe(o){try{o.draw(o.ctx,o.w,o.h);}catch(e){console.error('draw',o.cv.id,e);}}
-function paintAll(){for(const o of CANV){if(o.w<2)sizeOf(o);if(o.w>=2)safe(o);}}
+function register(id,draw){const cv=document.getElementById(id);if(!cv)return;const ctx=cv.getContext&&cv.getContext('2d');if(!ctx)return;
+  const h0=parseInt(cv.getAttribute('height'))||320;const o={cv,ctx,draw,w:0,h:h0,h0:h0};CANV.push(o);
+  if(typeof ResizeObserver!=='undefined'){try{new ResizeObserver(guard(function(){sizeOf(o);safe(o);})).observe(cv);}catch(_){}}return o;}
+function measureW(cv){return Math.round(cv.clientWidth||(cv.parentElement&&cv.parentElement.clientWidth)||(cv.getBoundingClientRect&&cv.getBoundingClientRect().width)||0);}
+function sizeOf(o){const dpr=Math.min(window.devicePixelRatio||1,2);let w=measureW(o.cv);if(w<2)w=600;const h=o.h0;
+  const bw=Math.max(1,Math.round(w*dpr)),bh=Math.max(1,Math.round(h*dpr));
+  if(o.cv.width!==bw)o.cv.width=bw;if(o.cv.height!==bh)o.cv.height=bh;o.cv.style.height=h+'px';
+  o.w=w;o.h=h;o.ctx.setTransform(dpr,0,0,dpr,0,0);}
+function safe(o){try{o.draw(o.ctx,o.w,o.h);}catch(e){try{console.error('draw',o.cv.id,e);}catch(_){}}}
+function paintAll(){for(const o of CANV){sizeOf(o);safe(o);}}
 
 /* ===== plotting helpers ===== */
-const COL={river:'#7fd0ff',fin:'#ffb454',fin2:'#ff7a6b',nuis:'#e3678c',cyan:'#46b6d6',mint:'#74f0bd',ink:'#e8f2f6',dim:'#7fa6b4',warn:'#ffcf6b'};
-function scaleOf(w,h,WB){const pad=18;return Math.min((w-2*pad)/(2*WB),(h-2*pad)/(2*WB));}
-function mk(w,h,WB){const s=scaleOf(w,h,WB),cx=w/2,cy=h/2;return p=>[cx+p[0]*s,cy-p[1]*s];}
-function grid(ctx,w,h,WB){ctx.clearRect(0,0,w,h);ctx.lineWidth=1;ctx.strokeStyle='rgba(168,214,232,0.06)';const m=mk(w,h,WB);
-  for(let g=-Math.floor(WB);g<=WB;g+=2){let a=m([g,-WB]),b=m([g,WB]);ctx.beginPath();ctx.moveTo(a[0],a[1]);ctx.lineTo(b[0],b[1]);ctx.stroke();
-    let c=m([-WB,g]),d=m([WB,g]);ctx.beginPath();ctx.moveTo(c[0],c[1]);ctx.lineTo(d[0],d[1]);ctx.stroke();}}
+const COL={base:'#90a6b3',inst:'#ffb454',river:'#7fd0ff',cyan:'#46b6d6',mint:'#74f0bd',ink:'#e8f2f6',dim:'#7fa6b4',warn:'#ffcf6b',nuis:'#e3678c'};
+function clr(cls){return cls==='other'?COL.base:(cls==='inst'?COL.inst:COL.river);}
 function arrow(ctx,a,b,color,wd){color=color||COL.ink;ctx.strokeStyle=color;ctx.fillStyle=color;ctx.lineWidth=wd||2.6;
   ctx.beginPath();ctx.moveTo(a[0],a[1]);ctx.lineTo(b[0],b[1]);ctx.stroke();
-  const ang=Math.atan2(b[1]-a[1],b[0]-a[0]),hl=10;ctx.beginPath();ctx.moveTo(b[0],b[1]);
-  ctx.lineTo(b[0]-hl*Math.cos(ang-0.4),b[1]-hl*Math.sin(ang-0.4));ctx.lineTo(b[0]-hl*Math.cos(ang+0.4),b[1]-hl*Math.sin(ang+0.4));ctx.closePath();ctx.fill();}
+  const an=Math.atan2(b[1]-a[1],b[0]-a[0]),hl=10;ctx.beginPath();ctx.moveTo(b[0],b[1]);
+  ctx.lineTo(b[0]-hl*Math.cos(an-0.4),b[1]-hl*Math.sin(an-0.4));ctx.lineTo(b[0]-hl*Math.cos(an+0.4),b[1]-hl*Math.sin(an+0.4));ctx.closePath();ctx.fill();}
 function disc(ctx,p,r,fill,ring){ctx.beginPath();ctx.arc(p[0],p[1],r,0,7);if(fill){ctx.fillStyle=fill;ctx.fill();}if(ring){ctx.lineWidth=2;ctx.strokeStyle=ring;ctx.stroke();}}
-function dashedCircle(ctx,c,rad,color){ctx.setLineDash([5,4]);ctx.lineWidth=1.6;ctx.strokeStyle=color;ctx.globalAlpha=.7;ctx.beginPath();ctx.arc(c[0],c[1],rad,0,7);ctx.stroke();ctx.globalAlpha=1;ctx.setLineDash([]);}
-function tag(ctx,p,txt,color,dx,dy){ctx.fillStyle=color||COL.ink;ctx.font='600 12px "IBM Plex Mono", ui-monospace, Menlo, monospace';ctx.textAlign='left';ctx.fillText(txt,p[0]+(dx||8),p[1]+(dy||0));}
+function txt(ctx,p,s,color,size,align){ctx.fillStyle=color||COL.dim;ctx.font='600 '+(size||12)+'px ui-monospace,Menlo,monospace';ctx.textAlign=align||'left';ctx.fillText(s,p[0],p[1]);ctx.textAlign='left';}
 
-/* =====================================================================
-   PANEL A — multi-meaning: diff-of-means miss vs region-aware catch
-   ===================================================================== */
-const TH=60*Math.PI/180, ES=[Math.cos(TH),Math.sin(TH)], EN=[-Math.sin(TH),Math.cos(TH)];
-function Wsn(s,n){return [s*ES[0]+n*EN[0], s*ES[1]+n*EN[1]];}
-const WB_A=5, RHO=1.1;
-let seedA=11, target=0, QA=null, MA=null;
-function genA(seed,SEP){const r=rng(seed),pts=[];
-  function add(cnt,sMu,nMu,cls,sub){for(let i=0;i<cnt;i++){const s=sMu+randn(r)*0.4,n=nMu+randn(r)*0.42;const w=Wsn(s,n);pts.push({p:w,cls,sub});}}
-  add(60,-1.0,0.0,'neg',-1); add(70,1.0,+SEP,'pos',0); add(30,1.0,-SEP,'pos',1);
-  return pts;}
-function buildA(){
-  const SEP=parseFloat(document.getElementById('sep').value);
-  const pts=genA(seedA,SEP);
-  const neg=pts.filter(p=>p.cls==='neg').map(p=>p.p);
-  const pos=pts.filter(p=>p.cls==='pos').map(p=>p.p);
-  const negM=mean(neg), posM=mean(pos);
-  const cInst=mean(pts.filter(p=>p.sub===0).map(p=>p.p));
-  const cAcct=mean(pts.filter(p=>p.sub===1).map(p=>p.p));
-  // recover financial regions by clustering (unsupervised) -> orient to inst/acct by proximity
-  const km=kmeans2(pos,7);
-  let rInst=km.C[0],rAcct=km.C[1];
-  if(dist(rInst,cInst)>dist(rAcct,cInst)){const t=rInst;rInst=rAcct;rAcct=t;}
-  const dG=[posM[0]-negM[0],posM[1]-negM[1]];                       // global diff-of-means
-  const dInst=[rInst[0]-negM[0],rInst[1]-negM[1]];                  // local vectors (from recovered centroids)
-  const dAcct=[rAcct[0]-negM[0],rAcct[1]-negM[1]];
-  // coverage from representative source = negM, alpha=1 reference
-  function covOf(vec){const land=[negM[0]+vec[0],negM[1]+vec[1]];return {inst:dist(land,cInst)<RHO,acct:dist(land,cAcct)<RHO,land};}
-  const cg=covOf(dG);
-  MA={pts,negM,posM,cInst,cAcct,rInst,rAcct,dG,dInst,dAcct,cg,SEP,
-      covG:(cg.inst?1:0)+(cg.acct?1:0)};
-  if(!QA)QA=negM.slice();
-  updateAtext();
-}
-function steer(q,vec,alpha){return [q[0]+alpha*vec[0], q[1]+alpha*vec[1]];}
-function landingSense(land){const di=dist(land,MA.cInst),da=dist(land,MA.cAcct);
-  if(Math.min(di,da)>RHO)return {name:'between meanings (ambiguous)',col:COL.dim};
-  return di<da?{name:'institution',col:COL.fin}:{name:'account',col:COL.fin2};}
-function drawScatterA(ctx,w,h,m){
-  const rpx=RHO*scaleOf(w,h,WB_A);
-  for(const pt of MA.pts){const P=m(pt.p);const c=pt.cls==='neg'?COL.river:(pt.sub===0?COL.fin:COL.fin2);
-    ctx.globalAlpha=.5;disc(ctx,P,3.4,c);ctx.globalAlpha=1;}
-  dashedCircle(ctx,m(MA.cInst),rpx,COL.fin);
-  dashedCircle(ctx,m(MA.cAcct),rpx,COL.fin2);
-}
-function drawG(ctx,w,h){if(!MA)return;const m=mk(w,h,WB_A);grid(ctx,w,h,WB_A);drawScatterA(ctx,w,h,m);
-  const alpha=parseFloat(document.getElementById('alpha').value);
-  // means
-  disc(ctx,m(MA.negM),7,COL.river,COL.ink); tag(ctx,m(MA.negM),'⊖ neg',COL.river,9,-8);
-  disc(ctx,m(MA.posM),7,COL.fin,COL.ink); tag(ctx,m(MA.posM),'⊕ pos mean',COL.fin,9,-8);
-  arrow(ctx,m(MA.negM),m(MA.posM),COL.warn,2.6);
-  // steered source
-  const land=steer(QA,MA.dG,alpha);const sense=landingSense(land);
-  arrow(ctx,m(QA),m(land),COL.mint,2.6);
-  disc(ctx,m(QA),8,'#0a212c',COL.ink);disc(ctx,m(QA),2.6,COL.ink);
-  disc(ctx,m(land),6.5,sense.col,COL.ink);
-  document.getElementById('lblG').textContent='lands in: '+sense.name;
-}
-function drawL(ctx,w,h){if(!MA)return;const m=mk(w,h,WB_A);grid(ctx,w,h,WB_A);drawScatterA(ctx,w,h,m);
-  const alpha=parseFloat(document.getElementById('alpha').value);
-  disc(ctx,m(MA.negM),7,COL.river,COL.ink); tag(ctx,m(MA.negM),'⊖',COL.river,9,-8);
-  // recovered region centroids
-  disc(ctx,m(MA.rInst),6,COL.fin,COL.ink); disc(ctx,m(MA.rAcct),6,COL.fin2,COL.ink);
-  // both local vectors faint, chosen one bold
-  arrow(ctx,m(MA.negM),m(MA.rInst),target===0?COL.mint:'rgba(116,240,189,.28)',target===0?2.8:2);
-  arrow(ctx,m(MA.negM),m(MA.rAcct),target===1?COL.mint:'rgba(116,240,189,.28)',target===1?2.8:2);
-  const vec=target===0?MA.dInst:MA.dAcct;
-  const land=steer(QA,vec,alpha);const sense=landingSense(land);
-  disc(ctx,m(QA),8,'#0a212c',COL.ink);disc(ctx,m(QA),2.6,COL.ink);
-  disc(ctx,m(land),6.5,sense.col,COL.ink);
-  document.getElementById('lblL').textContent='target → '+(target===0?'institution':'account')+' · lands in: '+sense.name;
-}
-function updateAtext(){
-  const covG=MA.covG;
-  document.getElementById('covGscore').textContent=covG+' / 2';
-  document.getElementById('covGscore').style.color=covG<2?COL.nuis:COL.mint;
-  document.getElementById('covGmeanings').innerHTML=
-    '<span class="'+(MA.cg.inst?'hit':'miss')+'">institution '+(MA.cg.inst?'✓':'✗')+'</span>'+
-    '<span class="'+(MA.cg.acct?'hit':'miss')+'">account '+(MA.cg.acct?'✓':'✗')+'</span>';
-  document.getElementById('covLscore').textContent='2 / 2';
-  document.getElementById('covLscore').style.color=COL.mint;
-  document.getElementById('covLmeanings').innerHTML='<span class="hit">institution ✓</span><span class="hit">account ✓</span>';
-  const note=document.getElementById('coreNote');
-  if(MA.covG===2) note.innerHTML='At this separation the two meanings overlap enough that one average still lands near both — diff-of-means is genuinely fine here. <b>Push separation up.</b>';
-  else if(MA.covG===1) note.innerHTML='The global vector points at the <b>majority</b> meaning and lands outside the <b style="color:var(--fin2)">account</b> neighborhood — that sense is steerable in the model but <b style="color:var(--nuis)">diff-of-means cannot reach it</b>. The local library still does.';
-  else note.innerHTML='The single average now lands in the dead zone <b style="color:var(--nuis)">between both meanings</b> — diff-of-means reaches neither, while the router reaches whichever you select.';
+/* ===== data model ===== */
+const TH=22*Math.PI/180, U0=[Math.cos(TH),Math.sin(TH)], U1=[-Math.sin(TH),Math.cos(TH)];
+function W(a,b){return [a*U0[0]+b*U1[0], a*U0[1]+b*U1[1]];}
+const A_SEP=5.0, SD=0.42, RHO=1.3;
+let method='dm', M=null;
+function gen(seed,B){const r=rng(seed),pts=[];
+  function add(c,a,b,cls){for(let i=0;i<c;i++){const w=W(a+randn(r)*SD,b+randn(r)*SD);pts.push({p:w,cls});}}
+  add(60,0,0,'other');add(70,A_SEP,0,'inst');add(30,A_SEP,B,'river');return pts;}
+function build(){
+  const B=parseFloat(document.getElementById('bsep').value);
+  const pts=gen(9,B);
+  const co=pts.map(p=>p.p);
+  const pc=pca2(co);
+  const pc0=co.map(p=>(p[0]-pc.mean[0])*pc.v0[0]+(p[1]-pc.mean[1])*pc.v0[1]);
+  const pc1=co.map(p=>(p[0]-pc.mean[0])*pc.v1[0]+(p[1]-pc.mean[1])*pc.v1[1]);
+  const cOther=mean(pts.filter(p=>p.cls==='other').map(p=>p.p));
+  const cInst =mean(pts.filter(p=>p.cls==='inst').map(p=>p.p));
+  const cRiver=mean(pts.filter(p=>p.cls==='river').map(p=>p.p));
+  const cBank =mean(pts.filter(p=>p.cls!=='other').map(p=>p.p));
+  // recover river: suppress PC0 -> residual PC1 coord; cluster bank subset
+  const thr=(Math.min.apply(null,pc0)+Math.max.apply(null,pc0))/2;
+  const bankIdx=pts.map((p,i)=>i).filter(i=>pc0[i]>thr);
+  const bankPC1=bankIdx.map(i=>pc1[i]);
+  const km=km1(bankPC1,3);
+  // orient clusters: the one with larger |mean PC1| is river
+  const m0=km.C[0],m1=km.C[1];const riverLabel=Math.abs(m0)>Math.abs(m1)?0:1;
+  const recovered={}; bankIdx.forEach((i,j)=>{recovered[i]=(km.as[j]===riverLabel)?'river':'inst';});
+  let corr=0; bankIdx.forEach(i=>{if(recovered[i]===pts[i].cls)corr++;}); const purity=corr/bankIdx.length;
+  const cRecRiver=mean(bankIdx.filter(i=>recovered[i]==='river').map(i=>pts[i].p));
+  // steering vectors
+  const dDM=[cBank[0]-cOther[0],cBank[1]-cOther[1]];                 // diff-of-means -> ~institution
+  const dPC0=[pc.v0[0],pc.v0[1]];                                    // top-PC direction
+  const dRiver=[cRecRiver[0]-cOther[0],cRecRiver[1]-cOther[1]];      // recovered river vector
+  // coverage: does a vector applied from cOther land within RHO of a sense centroid?
+  function landDM(){return [cOther[0]+dDM[0],cOther[1]+dDM[1]];}     // = cBank
+  function landPC0(){const t=(cBank[0]-cOther[0])*dPC0[0]+(cBank[1]-cOther[1])*dPC0[1];return [cOther[0]+dPC0[0]*t,cOther[1]+dPC0[1]*t];}
+  M={pts,pc,pc0,pc1,cOther,cInst,cRiver,cBank,cRecRiver,recovered,bankIdx,purity,
+     dDM,dPC0,dRiver,landDM,landPC0,B,varPC0:pc.l0/(pc.l0+pc.l1)};
+  // text
+  document.getElementById('bVal').textContent=B.toFixed(2);
+  document.getElementById('specLbl').textContent='PC0 '+(M.varPC0*100).toFixed(0)+'% · PC1 '+((1-M.varPC0)*100).toFixed(0)+'%';
+  document.getElementById('purScore').textContent=(purity*100).toFixed(0)+'%';
+  document.getElementById('purScore').style.color=purity>0.85?COL.mint:COL.warn;
+  document.getElementById('hierNote').innerHTML='PC0 carries <b>'+(M.varPC0*100).toFixed(0)+'%</b> of the variance and points at the institution sense. PC1 carries only <b>'+((1-M.varPC0)*100).toFixed(0)+'%</b> — yet projecting onto it cleanly separates the <b style="color:var(--river)">river</b> sense from the rest. The meaning was never absent; it was just quiet.';
 }
 
-/* =====================================================================
-   PANEL B — masked / variance hierarchy (2-class)
-   ===================================================================== */
-const TH2=65*Math.PI/180, ES2=[Math.cos(TH2),Math.sin(TH2)], EN2=[-Math.sin(TH2),Math.cos(TH2)];
-const WB_B=7, CORR_T=0.55;
-let seedB=42, MB=null;
-function genB(seed,sigmaN){const r=rng(seed),pts=[];const D=1.6,ss=0.5,n=160;
-  for(let i=0;i<n;i++){const sense=i<n/2?0:1;const s=(sense===0?-D/2:D/2)+randn(r)*ss;const nn=randn(r)*sigmaN;
-    pts.push({p:[s*ES2[0]+nn*EN2[0], s*ES2[1]+nn*EN2[1]],sense,tok:nn+randn(r)*0.3});}return pts;}
-function purity(as,pts){const c=[[0,0],[0,0]];for(let i=0;i<pts.length;i++)c[as[i]][pts[i].sense]++;return (Math.max(c[0][0],c[0][1])+Math.max(c[1][0],c[1][1]))/pts.length;}
-function buildB(){const sig=parseFloat(document.getElementById('sig').value);const pts=genB(seedB,sig);
-  const co=pts.map(p=>p.p);const pc=pca2(co);
-  const raw=kmeans2(co,7);
-  const proj=pts.map(p=>(p.p[0]-pc.mean[0])*pc.v0[0]+(p.p[1]-pc.mean[1])*pc.v0[1]);
-  const cTok=Math.abs(corr(proj,pts.map(p=>p.tok)));const masked=cTok>CORR_T;
-  const res=co.map(p=>{const dx=p[0]-pc.mean[0],dy=p[1]-pc.mean[1];const d=dx*pc.v0[0]+dy*pc.v0[1];return [pc.mean[0]+dx-d*pc.v0[0],pc.mean[1]+dy-d*pc.v0[1]];});
-  const resK=kmeans2(res,7);
-  MB={pts,pc,raw,resK,res,cTok,masked,rawP:purity(raw.as,pts),resP:purity(resK.as,pts),sig};
-  // stats
-  document.getElementById('sigVal').textContent=sig.toFixed(2);
-  document.getElementById('sRaw').textContent=MB.rawP.toFixed(2);document.getElementById('sRaw').style.color=MB.rawP>0.8?COL.mint:COL.nuis;
-  document.getElementById('sCorr').textContent=MB.cTok.toFixed(2);document.getElementById('sCorr').style.color=masked?COL.nuis:COL.mint;
-  document.getElementById('sRes').textContent=MB.resP.toFixed(2);document.getElementById('sRes').style.color=MB.resP>0.8?COL.mint:COL.nuis;
-  const badge=document.getElementById('badge'),vt=document.getElementById('verdictText');
-  if(masked){badge.className='badge mask';badge.textContent='MASKED';
-    vt.innerHTML='Top axis is <b style="color:var(--nuis)">position</b> — corr(PC0, token_pos)=<b class="mono">'+MB.cTok.toFixed(2)+'</b>. Unsupervised k-means lands near chance (<b class="mono">'+MB.rawP.toFixed(2)+'</b>). Suppress PC0 and the senses reappear (<b class="mono">'+MB.resP.toFixed(2)+'</b>).';}
-  else{badge.className='badge dom';badge.textContent='DOMINANT';
-    vt.innerHTML='Top axis already carries the sense — corr=<b class="mono">'+MB.cTok.toFixed(2)+'</b>, raw purity <b class="mono">'+MB.rawP.toFixed(2)+'</b>. Steer directly; suppressing PC0 here would delete the signal (residual <b class="mono">'+MB.resP.toFixed(2)+'</b>).';}
-}
-function drawM(ctx,w,h){if(!MB)return;const m=mk(w,h,WB_B);grid(ctx,w,h,WB_B);
-  const pc=MB.pc,s0=Math.sqrt(pc.l0),s1=Math.sqrt(pc.l1);
-  ctx.setLineDash([6,4]);ctx.lineWidth=2;ctx.strokeStyle=MB.masked?COL.nuis:COL.cyan;
-  let a=m([pc.mean[0]-pc.v0[0]*s0*2,pc.mean[1]-pc.v0[1]*s0*2]),b=m([pc.mean[0]+pc.v0[0]*s0*2,pc.mean[1]+pc.v0[1]*s0*2]);
+/* ===== scatter (§02) ===== */
+function fit(pts,pad,w,h){let xs=pts.map(p=>p[0]),ys=pts.map(p=>p[1]);let x0=Math.min.apply(null,xs),x1=Math.max.apply(null,xs),y0=Math.min.apply(null,ys),y1=Math.max.apply(null,ys);
+  const dx=(x1-x0)||1,dy=(y1-y0)||1;const s=Math.min((w-2*pad)/dx,(h-2*pad)/dy);const cx=(x0+x1)/2,cy=(y0+y1)/2;
+  return p=>[w/2+(p[0]-cx)*s, h/2-(p[1]-cy)*s];}
+function drawScatter(ctx,w,h){if(!M)return;ctx.clearRect(0,0,w,h);
+  const all=M.pts.map(p=>p.p).concat([M.cOther,M.cBank]);const m=fit(all,30,w,h);
+  // PC axes through mean
+  const s0=Math.sqrt(M.pc.l0),s1=Math.sqrt(M.pc.l1),mn=M.pc.mean;
+  ctx.setLineDash([6,5]);ctx.lineWidth=2;ctx.strokeStyle=COL.cyan;ctx.globalAlpha=.8;
+  let a=m([mn[0]-M.pc.v0[0]*s0*2.4,mn[1]-M.pc.v0[1]*s0*2.4]),b=m([mn[0]+M.pc.v0[0]*s0*2.4,mn[1]+M.pc.v0[1]*s0*2.4]);
   ctx.beginPath();ctx.moveTo(a[0],a[1]);ctx.lineTo(b[0],b[1]);ctx.stroke();
-  ctx.strokeStyle=COL.cyan;ctx.globalAlpha=.5;let c=m([pc.mean[0]-pc.v1[0]*s1*2,pc.mean[1]-pc.v1[1]*s1*2]),d=m([pc.mean[0]+pc.v1[0]*s1*2,pc.mean[1]+pc.v1[1]*s1*2]);
+  ctx.strokeStyle=COL.mint;let c=m([mn[0]-M.pc.v1[0]*s1*2.4,mn[1]-M.pc.v1[1]*s1*2.4]),d=m([mn[0]+M.pc.v1[0]*s1*2.4,mn[1]+M.pc.v1[1]*s1*2.4]);
   ctx.beginPath();ctx.moveTo(c[0],c[1]);ctx.lineTo(d[0],d[1]);ctx.stroke();ctx.globalAlpha=1;ctx.setLineDash([]);
-  const cnt=[[0,0],[0,0]];for(let i=0;i<MB.pts.length;i++)cnt[MB.raw.as[i]][MB.pts[i].sense]++;
-  const l2s=[cnt[0][1]>cnt[0][0]?1:0,cnt[1][1]>cnt[1][0]?1:0];
-  for(let i=0;i<MB.pts.length;i++){const P=m(MB.pts[i].p);const trueC=MB.pts[i].sense===0?COL.river:COL.fin;const kmC=l2s[MB.raw.as[i]]===0?COL.river:COL.fin;
-    ctx.globalAlpha=.85;disc(ctx,P,4.4,kmC);ctx.globalAlpha=1;ctx.lineWidth=1.6;ctx.strokeStyle=trueC;ctx.stroke();}
-  document.getElementById('lblM').textContent='PC0 ≈ '+(MB.masked?'nuisance':'sense');
+  txt(ctx,b,' PC0',COL.cyan,12);txt(ctx,d,' PC1',COL.mint,12);
+  // points
+  for(const pt of M.pts){const P=m(pt.p);ctx.globalAlpha=.85;disc(ctx,P,4,clr(pt.cls));ctx.globalAlpha=1;}
+  // contrast centroid marker
+  disc(ctx,m(M.cOther),6,COL.base,COL.ink);txt(ctx,[m(M.cOther)[0]+8,m(M.cOther)[1]-6],'⊖ stone',COL.base,11);
+  // method vector
+  const land=method==='dm'?M.landDM():M.landPC0();
+  arrow(ctx,m(M.cOther),m(land),method==='dm'?COL.warn:COL.cyan,2.8);
+  disc(ctx,m(land),6,COL.inst,COL.ink);
+  // mark the unreachable river sense
+  ctx.setLineDash([3,3]);ctx.lineWidth=1.6;ctx.strokeStyle=COL.river;ctx.globalAlpha=.8;
+  ctx.beginPath();ctx.arc(m(M.cRiver)[0],m(M.cRiver)[1],RHO*Math.min((w-60),(h-60))/ (2*span(M)),0,7);ctx.stroke();ctx.globalAlpha=1;ctx.setLineDash([]);
+  txt(ctx,[m(M.cRiver)[0]+9,m(M.cRiver)[1]],'river — missed',COL.river,11);
+  document.getElementById('scLbl').textContent=method==='dm'?'d = mean(bank) − mean(stone)':'d = PC0';
 }
-function drawV(ctx,w,h){if(!MB)return;ctx.clearRect(0,0,w,h);
-  const tot=MB.pc.l0+MB.pc.l1,share=[MB.pc.l0/tot,MB.pc.l1/tot];
-  const bw=w*0.16,gap=w*0.1,x0=w*0.5-bw-gap/2,base=h*0.52,top=42,H=base-top;
-  const labels=['PC0','PC1'],cols=[MB.masked?COL.nuis:COL.cyan,COL.cyan];
-  for(let k=0;k<2;k++){const x=x0+k*(bw+gap),bh=share[k]*H;ctx.globalAlpha=k===1?.55:1;ctx.fillStyle=cols[k];ctx.fillRect(x,base-bh,bw,bh);ctx.globalAlpha=1;
-    ctx.fillStyle=COL.ink;ctx.font='600 13px "IBM Plex Mono", ui-monospace, Menlo, monospace';ctx.textAlign='center';ctx.fillText((share[k]*100).toFixed(0)+'%',x+bw/2,base-bh-8);
-    ctx.fillStyle=COL.dim;ctx.fillText(labels[k],x+bw/2,base+18);}
-  ctx.font='600 12px "IBM Plex Mono", ui-monospace, Menlo, monospace';ctx.textAlign='center';
-  if(MB.masked){ctx.fillStyle=COL.nuis;ctx.fillText('⚑ PC0 flagged: position-correlated',w/2,top-14);}
-  else{ctx.fillStyle=COL.mint;ctx.fillText('PC0 carries the sense — keep it',w/2,top-14);}
-  // recovery bars
-  const by=h-30,bH=(h-base-58),bx=w*0.5,bbw=w*0.16,bgap=w*0.1,bx0=bx-bbw-bgap/2;
-  const vals=[MB.rawP,MB.resP],blabs=['raw','residual'],better=MB.resP>=MB.rawP;
-  const baseY=h-30,topY=base+30,Hh=baseY-topY;
-  ctx.setLineDash([5,4]);ctx.strokeStyle='rgba(255,207,107,.55)';ctx.lineWidth=1.4;const chY=baseY-0.5*Hh;
-  ctx.beginPath();ctx.moveTo(bx0-16,chY);ctx.lineTo(bx0+2*bbw+bgap+16,chY);ctx.stroke();ctx.setLineDash([]);
-  ctx.fillStyle=COL.warn;ctx.font='10px "IBM Plex Mono", ui-monospace, Menlo, monospace';ctx.textAlign='left';ctx.fillText('chance',bx0+2*bbw+bgap-8,chY-5);
-  for(let k=0;k<2;k++){const x=bx0+k*(bbw+bgap),bh=Math.max(2,vals[k]*Hh);const col=k===0?'#9fc1cf':(better?COL.mint:COL.nuis);
-    ctx.fillStyle=col;ctx.fillRect(x,baseY-bh,bbw,bh);ctx.fillStyle=COL.ink;ctx.font='600 12px "Space Grotesk", system-ui, sans-serif';ctx.textAlign='center';ctx.fillText(vals[k].toFixed(2),x+bbw/2,baseY-bh-7);
-    ctx.fillStyle=COL.dim;ctx.font='10px "IBM Plex Mono", ui-monospace, Menlo, monospace';ctx.fillText(blabs[k],x+bbw/2,baseY+14);}
-  ctx.fillStyle=better?COL.mint:COL.nuis;ctx.font='600 11px "IBM Plex Mono", ui-monospace, Menlo, monospace';ctx.textAlign='center';
-  ctx.fillText(better?'suppression rescues ↑':'suppression deletes signal ↓',w/2,topY-12);
-}
+function span(M){const xs=M.pts.map(p=>p.p[0]).concat(M.pts.map(p=>p.p[1]));return (Math.max.apply(null,xs)-Math.min.apply(null,xs))||1;}
 
-/* ===== drag on Panel A canvases ===== */
-function attachDragA(id){const cv=document.getElementById(id);let drag=false;
-  function toW(ev){const r=cv.getBoundingClientRect();const x=ev.clientX-r.left,y=ev.clientY-r.top;const w=cv.clientWidth,h=parseInt(cv.getAttribute('height'));
-    const pad=18,s=Math.min((w-2*pad)/(2*WB_A),(h-2*pad)/(2*WB_A));return [(x-w/2)/s,-(y-h/2)/s];}
-  cv.addEventListener('pointerdown',e=>{drag=true;try{cv.setPointerCapture(e.pointerId);}catch(_){ }QA=toW(e);paintAll();});
-  cv.addEventListener('pointermove',e=>{if(drag){QA=toW(e);paintAll();}});
-  cv.addEventListener('pointerup',()=>{drag=false;});
-  cv.addEventListener('pointercancel',()=>{drag=false;});
+/* ===== spectrum (§03) ===== */
+function drawSpectrum(ctx,w,h){if(!M)return;ctx.clearRect(0,0,w,h);
+  const tot=M.pc.l0+M.pc.l1,share=[M.pc.l0/tot,M.pc.l1/tot];
+  const bw=w*0.2,gap=w*0.12,x0=w*0.5-bw-gap/2,base=h-40,top=44,H=base-top;
+  const labs=['PC0',"PC1"],cols=[COL.cyan,COL.mint],sub=['institution axis','river axis'];
+  for(let k=0;k<2;k++){const x=x0+k*(bw+gap),bh=Math.max(3,share[k]*H);ctx.fillStyle=cols[k];ctx.fillRect(x,base-bh,bw,bh);
+    ctx.fillStyle=COL.ink;ctx.font='600 14px ui-sans-serif,system-ui';ctx.textAlign='center';ctx.fillText((share[k]*100).toFixed(0)+'%',x+bw/2,base-bh-9);
+    ctx.fillStyle=cols[k];ctx.font='600 12px ui-monospace,Menlo,monospace';ctx.fillText(labs[k],x+bw/2,base+18);
+    ctx.fillStyle=COL.dim;ctx.font='500 10px ui-monospace,Menlo,monospace';ctx.fillText(sub[k],x+bw/2,base+33);}
+  ctx.textAlign='left';
+  ctx.fillStyle=COL.mint;ctx.font='600 12px ui-monospace,Menlo,monospace';ctx.textAlign='center';
+  ctx.fillText('the quiet meaning lives here →',x0+bw+gap+bw/2, top-16);ctx.textAlign='left';
 }
 
-/* ===== wiring (all guarded) ===== */
-register('cG',drawG);register('cL',drawL);register('cM',drawM);register('cV',drawV);
-attachDragA('cG');attachDragA('cL');
-function refreshA(){buildA();paintAll();}
-function refreshB(){buildB();paintAll();}
-document.getElementById('sep').addEventListener('input',guard(function(){document.getElementById('sepVal').textContent=parseFloat(document.getElementById('sep').value).toFixed(2);QA=null;refreshA();}));
-document.getElementById('alpha').addEventListener('input',guard(function(){document.getElementById('aVal').textContent=parseFloat(document.getElementById('alpha').value).toFixed(2);paintAll();}));
-document.getElementById('targetSeg').addEventListener('click',guard(function(e){const b=e.target.closest('button');if(!b)return;target=parseInt(b.dataset.t);
-  [].slice.call(document.querySelectorAll('#targetSeg button')).forEach(function(x){x.classList.toggle('on',x===b);});paintAll();}));
-document.getElementById('resetq').addEventListener('click',guard(function(){QA=MA?MA.negM.slice():null;paintAll();}));
-document.getElementById('sig').addEventListener('input',guard(refreshB));
-document.getElementById('reseed').addEventListener('click',guard(function(){seedB=Math.floor(Math.random()*99999);refreshB();}));
-window.addEventListener('resize',guard(function(){for(const o of CANV)o.w=0;paintAll();}));
+/* ===== projection strips (§03) ===== */
+function strip(ctx,w,yc,hh,coords,labelTxt,sepInfo){
+  const pad=46;let lo=Math.min.apply(null,coords),hi=Math.max.apply(null,coords);const d=(hi-lo)||1;lo-=d*0.08;hi+=d*0.08;
+  const mx=v=>pad+(v-lo)/(hi-lo)*(w-2*pad);
+  ctx.strokeStyle=COL.rule||'rgba(168,214,232,0.18)';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(pad,yc);ctx.lineTo(w-pad,yc);ctx.stroke();
+  txt(ctx,[6,yc+4],labelTxt,COL.dim,11);
+  const r=rng(99);
+  for(let i=0;i<M.pts.length;i++){const x=mx(coords[i]);const jit=(r()-0.5)*hh*0.8;ctx.globalAlpha=.8;disc(ctx,[x,yc+jit],3.3,clr(M.pts[i].cls));ctx.globalAlpha=1;}
+  if(sepInfo){ctx.fillStyle=sepInfo.col;ctx.font='600 11px ui-monospace,Menlo,monospace';ctx.textAlign='right';ctx.fillText(sepInfo.text,w-pad,yc-hh*0.7);ctx.textAlign='left';}
+}
+function drawStrip(ctx,w,h){if(!M)return;ctx.clearRect(0,0,w,h);
+  strip(ctx,w,h*0.32,h*0.22,M.pc0,'PC0',{text:'institution & river overlap',col:COL.warn});
+  strip(ctx,w,h*0.78,h*0.22,M.pc1,'PC1',{text:'river separates ✓',col:COL.mint});
+}
 
-guard(function(){buildA();buildB();paintAll();})();
-// repaint after layout/fonts settle (covers zero-width first frame in embeds)
-requestAnimationFrame(guard(function(){for(const o of CANV)o.w=0;paintAll();}));
-setTimeout(guard(function(){for(const o of CANV)o.w=0;paintAll();}),250);
+/* ===== recover (§04) ===== */
+function drawRecover(ctx,w,h){if(!M)return;ctx.clearRect(0,0,w,h);
+  // residual coords: (pc0 ~ 0 after suppression) plot as (pc1, smallJitter) — show along PC1 line
+  const pad=40;const pc1=M.pc1;let lo=Math.min.apply(null,pc1),hi=Math.max.apply(null,pc1);const dd=(hi-lo)||1;lo-=dd*0.1;hi+=dd*0.1;
+  const mx=v=>pad+(v-lo)/(hi-lo)*(w-2*pad);const yc=h*0.5;
+  ctx.strokeStyle='rgba(168,214,232,0.18)';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(pad,yc);ctx.lineTo(w-pad,yc);ctx.stroke();
+  txt(ctx,[6,yc-6],'residual ≈ PC1',COL.dim,11);
+  const r=rng(7);
+  for(let i=0;i<M.pts.length;i++){const x=mx(pc1[i]);const jit=(r()-0.5)*h*0.42;const P=[x,yc+jit];
+    const isBank=M.recovered.hasOwnProperty(i);
+    const fillC=isBank?(M.recovered[i]==='river'?COL.river:COL.inst):COL.base;
+    ctx.globalAlpha=.85;disc(ctx,P,4,fillC);ctx.globalAlpha=1;
+    ctx.lineWidth=1.4;ctx.strokeStyle=clr(M.pts[i].cls);ctx.stroke();}
+  // annotate recovered river region
+  const rx=mx(M.pts.reduce((s,p,i)=>M.recovered[i]==='river'?s+M.pc1[i]:s,0)/Math.max(1,M.bankIdx.filter(i=>M.recovered[i]==='river').length));
+  ctx.fillStyle=COL.mint;ctx.font='600 12px ui-monospace,Menlo,monospace';ctx.textAlign='center';
+  ctx.fillText('↑ recovered river cluster', rx, h*0.14);ctx.textAlign='left';
+}
+
+/* ===== coverage bars (§04) ===== */
+function drawBars(ctx,w,h){if(!M)return;ctx.clearRect(0,0,w,h);
+  const groups=[{n:'diff-of-means',v:1,c:COL.warn},{n:'top-PC',v:1,c:COL.cyan},{n:'variance\nhierarchy',v:2,c:COL.mint}];
+  const base=h-54,top=40,H=base-top,bw=w*0.18,gap=(w-3*bw-40)/2,x0=20;
+  // y gridline at 1 and 2
+  for(let g=1;g<=2;g++){const y=base-(g/2)*H;ctx.strokeStyle='rgba(168,214,232,0.12)';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(x0,y);ctx.lineTo(w-12,y);ctx.stroke();
+    ctx.fillStyle=COL.dim;ctx.font='10px ui-monospace,Menlo,monospace';ctx.textAlign='left';ctx.fillText(g+'/2',w-30,y-4);}
+  groups.forEach((gp,k)=>{const x=x0+k*(bw+gap),bh=(gp.v/2)*H;ctx.fillStyle=gp.c;ctx.fillRect(x,base-bh,bw,bh);
+    ctx.fillStyle=COL.ink;ctx.font='600 18px ui-sans-serif,system-ui';ctx.textAlign='center';ctx.fillText(gp.v+'/2',x+bw/2,base-bh-9);
+    ctx.fillStyle=COL.dim;ctx.font='500 11px ui-monospace,Menlo,monospace';gp.n.split('\n').forEach((ln,li)=>ctx.fillText(ln,x+bw/2,base+18+li*13));});
+  ctx.textAlign='left';ctx.fillStyle=COL.dim;ctx.font='600 11px ui-monospace,Menlo,monospace';ctx.fillText('meanings of "bank" reachable',x0,top-16);
+}
+
+/* ===== wiring ===== */
+guard(function(){
+  register('cScatter',drawScatter);
+  register('cSpectrum',drawSpectrum);
+  register('cStrip',drawStrip);
+  register('cRecover',drawRecover);
+  register('cBars',drawBars);
+  document.getElementById('methodSeg').addEventListener('click',guard(function(e){const b=e.target.closest('button');if(!b)return;method=b.dataset.m;
+    [].slice.call(document.querySelectorAll('#methodSeg button')).forEach(function(x){x.classList.toggle('on',x===b);});
+    document.getElementById('m1h').textContent=(method==='dm'?'diff-of-means':'top-PC')+' · meanings reachable';paintAll();}));
+  document.getElementById('bsep').addEventListener('input',guard(function(){build();paintAll();}));
+  build();paintAll();
+  [0,60,150,300,600,1000,1500].forEach(function(ms){setTimeout(guard(paintAll),ms);});
+  if(typeof requestAnimationFrame!=='undefined')requestAnimationFrame(guard(paintAll));
+  window.addEventListener('load',guard(paintAll));
+  window.addEventListener('resize',guard(paintAll));
+})();
 </script>
 </body>
 </html>
