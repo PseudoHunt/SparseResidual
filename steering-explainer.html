@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Variance-Hierarchy Steering — a toy walkthrough</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0a212c;          /* blueprint navy */
+    --panel:#0f2c3a;
+    --panel2:#123545;
+    --grid:rgba(168,214,232,0.07);
+    --gridhard:rgba(168,214,232,0.16);
+    --ink:#e8f2f6;
+    --dim:#7fa6b4;
+    --rule:rgba(168,214,232,0.18);
+    --cyan:#46b6d6;        /* structural accent */
+    --river:#7fd0ff;       /* sense A */
+    --fin:#ffb454;         /* sense B */
+    --nuis:#e3678c;        /* nuisance axis */
+    --mint:#74f0bd;        /* recovered / target */
+    --warn:#ffcf6b;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0;background:var(--bg);color:var(--ink);
+    font-family:'Inter',system-ui,sans-serif;line-height:1.6;
+    background-image:
+      linear-gradient(var(--grid) 1px,transparent 1px),
+      linear-gradient(90deg,var(--grid) 1px,transparent 1px);
+    background-size:34px 34px;
+  }
+  .wrap{max-width:1120px;margin:0 auto;padding:0 22px 120px}
+  header{padding:64px 0 28px;border-bottom:1px solid var(--rule)}
+  .eyebrow{font-family:'IBM Plex Mono',monospace;font-size:12px;letter-spacing:.22em;
+    text-transform:uppercase;color:var(--cyan);margin-bottom:18px}
+  h1{font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:clamp(30px,5vw,52px);
+    line-height:1.05;margin:0 0 18px;letter-spacing:-.02em}
+  h1 .stack{display:block}
+  h1 em{font-style:normal;color:var(--mint)}
+  .thesis{max-width:640px;color:var(--dim);font-size:clamp(15px,2vw,18px)}
+  .thesis b{color:var(--ink);font-weight:600}
+  .mono{font-family:'IBM Plex Mono',monospace}
+
+  section{padding:54px 0;border-bottom:1px solid var(--rule)}
+  .sec-no{font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--cyan);
+    letter-spacing:.18em}
+  h2{font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:clamp(22px,3vw,30px);
+    margin:8px 0 14px;letter-spacing:-.01em}
+  p.lead{max-width:680px;color:var(--dim)}
+  p.lead b{color:var(--ink);font-weight:600}
+  code{font-family:'IBM Plex Mono',monospace;background:var(--panel2);
+    padding:1px 6px;border-radius:4px;font-size:.88em;color:var(--mint)}
+
+  .legend{display:flex;gap:20px;flex-wrap:wrap;font-family:'IBM Plex Mono',monospace;
+    font-size:12.5px;color:var(--dim);margin:18px 0 6px}
+  .legend span{display:inline-flex;align-items:center;gap:7px}
+  .dot{width:11px;height:11px;border-radius:50%;display:inline-block}
+  .bar{width:18px;height:3px;display:inline-block;border-radius:2px}
+
+  .lab{background:var(--panel);border:1px solid var(--rule);border-radius:14px;
+    padding:22px;margin-top:26px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:22px}
+  @media(max-width:820px){.grid2{grid-template-columns:1fr}}
+  .plot-title{font-family:'IBM Plex Mono',monospace;font-size:12px;letter-spacing:.12em;
+    text-transform:uppercase;color:var(--dim);margin:2px 0 10px;display:flex;
+    justify-content:space-between;align-items:baseline}
+  canvas{width:100%;display:block;border-radius:9px;background:#08191f;
+    border:1px solid var(--rule);touch-action:none}
+
+  .controls{display:flex;flex-wrap:wrap;gap:26px;align-items:center;margin-top:22px;
+    padding-top:20px;border-top:1px dashed var(--rule)}
+  .ctl{display:flex;flex-direction:column;gap:7px;min-width:210px}
+  .ctl label{font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--dim);
+    letter-spacing:.04em;display:flex;justify-content:space-between}
+  .ctl label b{color:var(--mint);font-weight:600}
+  input[type=range]{-webkit-appearance:none;appearance:none;height:4px;border-radius:3px;
+    background:linear-gradient(90deg,var(--cyan),var(--nuis));outline:none}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:17px;height:17px;
+    border-radius:50%;background:var(--ink);border:3px solid var(--cyan);cursor:pointer}
+  input[type=range]::-moz-range-thumb{width:14px;height:14px;border-radius:50%;
+    background:var(--ink);border:3px solid var(--cyan);cursor:pointer}
+  .toggle{display:flex;align-items:center;gap:9px;font-family:'IBM Plex Mono',monospace;
+    font-size:12.5px;color:var(--dim);cursor:pointer;user-select:none}
+  .toggle input{accent-color:var(--cyan);width:15px;height:15px}
+  button.btn{font-family:'IBM Plex Mono',monospace;font-size:12.5px;letter-spacing:.04em;
+    background:var(--panel2);color:var(--ink);border:1px solid var(--cyan);
+    padding:9px 16px;border-radius:7px;cursor:pointer;transition:.15s}
+  button.btn:hover{background:var(--cyan);color:#06181f}
+
+  .readout{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:22px}
+  @media(max-width:680px){.readout{grid-template-columns:1fr}}
+  .stat{background:var(--panel2);border:1px solid var(--rule);border-radius:10px;padding:14px 16px}
+  .stat .k{font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.1em;
+    text-transform:uppercase;color:var(--dim)}
+  .stat .v{font-family:'Space Grotesk',sans-serif;font-size:26px;font-weight:600;margin-top:3px}
+  .stat .s{font-size:12px;color:var(--dim);margin-top:2px}
+
+  .verdict{margin-top:22px;border:1px solid var(--rule);border-radius:10px;overflow:hidden}
+  .verdict .head{padding:14px 18px;font-family:'IBM Plex Mono',monospace;font-size:13px;
+    letter-spacing:.06em;display:flex;justify-content:space-between;align-items:center}
+  .verdict .body{padding:0 18px 16px;color:var(--dim);font-size:14.5px}
+  .badge{font-family:'IBM Plex Mono',monospace;font-weight:600;padding:4px 12px;border-radius:20px;
+    font-size:12.5px;letter-spacing:.08em}
+  .badge.dom{background:rgba(116,240,189,.14);color:var(--mint);border:1px solid var(--mint)}
+  .badge.mask{background:rgba(227,103,140,.14);color:var(--nuis);border:1px solid var(--nuis)}
+
+  table.regimes{width:100%;border-collapse:collapse;margin-top:24px;font-size:14px}
+  table.regimes th,table.regimes td{text-align:left;padding:12px 14px;border-bottom:1px solid var(--rule);vertical-align:top}
+  table.regimes th{font-family:'IBM Plex Mono',monospace;font-size:11.5px;letter-spacing:.1em;
+    text-transform:uppercase;color:var(--cyan)}
+  table.regimes td:first-child{font-family:'Space Grotesk',sans-serif;font-weight:600;color:var(--ink);white-space:nowrap}
+  table.regimes td .tag{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--dim)}
+
+  .pipeline{display:flex;flex-wrap:wrap;gap:8px;margin-top:22px;font-family:'IBM Plex Mono',monospace;font-size:12.5px}
+  .pipeline .step{background:var(--panel2);border:1px solid var(--rule);border-radius:7px;
+    padding:8px 12px;color:var(--dim)}
+  .pipeline .step b{color:var(--ink);font-weight:600}
+  .pipeline .arr{color:var(--cyan);align-self:center}
+
+  .hint{font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--dim);margin-top:10px}
+  .hint b{color:var(--mint)}
+  footer{padding:40px 0 0;color:var(--dim);font-size:13px;font-family:'IBM Plex Mono',monospace}
+  .kbd{color:var(--mint)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div class="eyebrow">Interactive figure · post-hoc activation steering</div>
+  <h1><span class="stack">A concept isn't always</span><span class="stack">the <em>loudest</em> direction.</span></h1>
+  <p class="thesis">Standard steering computes one vector and adds it everywhere. But the target structure can sit <b>beneath</b> a higher-variance nuisance axis — position, length, formatting. This page builds a tiny synthetic activation set for the word <b>"bank"</b> and lets you watch naive clustering chase the nuisance, then watch suppression recover the two senses and turn them into a steering vector. Everything below is computed live from the points; nothing is canned.</p>
+</header>
+
+<!-- 1 — THE DATA -->
+<section id="data">
+  <div class="sec-no">01 / THE TOY ACTIVATION SET</div>
+  <h2>Two senses, one nuisance</h2>
+  <p class="lead">Each point is a fake <code>d=2</code> activation at the "bank" token. Two ground-truth senses are separated by a fixed, modest gap along a hidden <b>semantic axis</b>. A second orthogonal <b>nuisance axis</b> carries token-position / sentence-length variation — and we can crank its variance with the slider in the next panel. A per-point <code>token_position</code> value is generated correlated with the nuisance coordinate, so the detector has metadata to lean on.</p>
+  <div class="legend">
+    <span><span class="dot" style="background:var(--river)"></span> river sense &nbsp;<span class="mono">"sat near the bank"</span></span>
+    <span><span class="dot" style="background:var(--fin)"></span> financial sense &nbsp;<span class="mono">"approved the loan"</span></span>
+    <span><span class="bar" style="background:var(--nuis)"></span> nuisance axis (PC may align here)</span>
+    <span><span class="bar" style="background:var(--cyan)"></span> recovered semantic axis</span>
+  </div>
+</section>
+
+<!-- 2 — DIAGNOSE -->
+<section id="diagnose">
+  <div class="sec-no">02 / DIAGNOSE THE GEOMETRY</div>
+  <h2>Run the variance hierarchy. Ask what PC0 actually is.</h2>
+  <p class="lead">PCA gives the variance-ranked axes. The method's first question isn't "what are the clusters" but <b>"is the top axis the signal or a nuisance?"</b> Drag the nuisance slider and watch the regime flip: at low nuisance the top axis <i>is</i> the sense (Dominant); past the crossover the top axis becomes position and naive k-means collapses to chance (Masked).</p>
+
+  <div class="lab">
+    <div class="grid2">
+      <div>
+        <div class="plot-title"><span>Activation space · k-means(k=2) on raw H</span><span class="mono" id="rawlbl">—</span></div>
+        <canvas id="cRaw" height="360"></canvas>
+        <div class="hint">Hollow ring = true sense · fill = k-means label. Mismatch = clustering followed the wrong axis. Cyan/pink lines are PC0/PC1.</div>
+      </div>
+      <div>
+        <div class="plot-title"><span>Variance hierarchy</span><span class="mono">explained var.</span></div>
+        <canvas id="cVar" height="360"></canvas>
+        <div class="hint">PC0 height = its share of variance. It turns <b style="color:var(--nuis)">pink</b> when it correlates with <code>token_position</code> above threshold — i.e. flagged as nuisance.</div>
+      </div>
+    </div>
+
+    <div class="controls">
+      <div class="ctl">
+        <label>nuisance variance &nbsp;σ_nuis <b id="sigVal">1.50</b></label>
+        <input id="sig" type="range" min="0.3" max="3.5" step="0.05" value="1.5">
+      </div>
+      <button class="btn" id="reseed">↻ reseed sample</button>
+      <div class="hint" style="margin:0">Tip: sweep slowly from left to right to find the crossover.</div>
+    </div>
+
+    <div class="readout">
+      <div class="stat"><div class="k">raw k-means purity</div><div class="v" id="sRaw">—</div><div class="s">sense recovery with no suppression</div></div>
+      <div class="stat"><div class="k">corr(PC0, token_pos)</div><div class="v" id="sCorr">—</div><div class="s">&gt; 0.55 ⟹ flag PC0 as nuisance</div></div>
+      <div class="stat"><div class="k">PC0 variance share</div><div class="v" id="sVar">—</div><div class="s">how dominant the top axis is</div></div>
+    </div>
+
+    <div class="verdict">
+      <div class="head"><span>Regime verdict</span><span id="badge" class="badge dom">DOMINANT</span></div>
+      <div class="body" id="verdictText">—</div>
+    </div>
+  </div>
+</section>
+
+<!-- 3 — RECOVER + STEER -->
+<section id="recover">
+  <div class="sec-no">03 / SUPPRESS, RECOVER, BUILD THE VECTOR</div>
+  <h2>Lift PC0 off. Cluster the residual. Diff the centroids.</h2>
+  <p class="lead">When PC0 is flagged, project it out: <code>H_clean = H − H·v₀v₀ᵀ</code>. The cloud collapses onto the residual line where the senses are now the only structure left. Re-cluster, then the steering vector is just the centroid difference, <code>d = mean(C_fin) − mean(C_river)</code> — cleaned of the nuisance it never should have contained.</p>
+
+  <div class="lab">
+    <div class="grid2">
+      <div>
+        <div class="plot-title"><span>Residual space · after suppressing PC0</span><span class="mono" id="reslbl">—</span></div>
+        <canvas id="cRes" height="360"></canvas>
+        <div class="hint">Points slide onto the residual line; k-means now splits by <b style="color:var(--mint)">sense</b>. The <b style="color:var(--mint)">mint arrow</b> is the recovered steering vector d.</div>
+      </div>
+      <div>
+        <div class="plot-title"><span>Purity: what suppression bought you</span><span class="mono">raw → residual</span></div>
+        <canvas id="cBar" height="360"></canvas>
+        <div class="hint">In the Dominant regime, suppression <b style="color:var(--nuis)">hurts</b> (you deleted the signal). In the Masked regime it <b style="color:var(--mint)">rescues</b> the senses. The method only suppresses when the flag fires.</div>
+      </div>
+    </div>
+    <div class="controls">
+      <label class="toggle"><input type="checkbox" id="multi"> multi-region: split financial into <span class="mono">&nbsp;institution&nbsp;</span>+<span class="mono">&nbsp;account&nbsp;</span> sub-modes</label>
+      <div class="hint" style="margin:0">When on, one global vector under-serves both modes — the inference router below uses a <b>local</b> vector per region.</div>
+    </div>
+  </div>
+</section>
+
+<!-- 4 — INFERENCE -->
+<section id="inference">
+  <div class="sec-no">04 / STEER AT INFERENCE</div>
+  <h2>Route the live activation, then push it.</h2>
+  <p class="lead">At generation time a "bank" activation arrives. The router scores region membership <code>p_i = softmax(−β‖h−c_i‖²)</code>, picks the nearest region's <b>local</b> steering vector, and applies <code>h' = h + α·d</code>. Drag the query; raise α; watch the predicted sense flip from river to financial as it crosses the boundary.</p>
+
+  <div class="lab">
+    <div class="plot-title"><span>Drag the ◎ query · live region-aware steering</span><span class="mono" id="inflbl">—</span></div>
+    <canvas id="cInf" height="380"></canvas>
+    <div class="controls">
+      <div class="ctl">
+        <label>steering strength &nbsp;α <b id="aVal">1.30</b></label>
+        <input id="alpha" type="range" min="0" max="2.5" step="0.05" value="1.3">
+      </div>
+      <button class="btn" id="resetq">↻ reset query</button>
+    </div>
+    <div class="readout">
+      <div class="stat"><div class="k">routed region</div><div class="v" id="iRegion" style="font-size:20px">—</div><div class="s">nearest local steering vector chosen</div></div>
+      <div class="stat"><div class="k">predicted sense @ h'</div><div class="v" id="iSense" style="font-size:20px">—</div><div class="s">which centroid h' lands nearest</div></div>
+      <div class="stat"><div class="k">membership p(river)</div><div class="v" id="iP">—</div><div class="s">softmax routing score</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- 5 — MAP BACK -->
+<section id="regimes">
+  <div class="sec-no">05 / THE FOUR REGIMES</div>
+  <h2>One diagnostic, four interventions</h2>
+  <p class="lead">The slider you played with traces the top edge of this table. The whole point of the method is that it <b>diagnoses before it steers</b> — the geometry tells you which tool to reach for.</p>
+  <table class="regimes">
+    <thead><tr><th>Regime</th><th>Signature in this toy</th><th>Intervention</th></tr></thead>
+    <tbody>
+      <tr><td>Dominant <span class="tag">σ low</span></td><td>Raw k-means already separates senses; PC0 ⟂ token_position.</td><td>Direct cluster-difference vector. Do <b>not</b> suppress.</td></tr>
+      <tr><td>Masked <span class="tag">σ high</span></td><td>Raw purity ≈ chance; PC0 ≈ token_position. Suppress → senses appear.</td><td>Steer in the residual after projecting PC0 out.</td></tr>
+      <tr><td>Multi-region <span class="tag">toggle on</span></td><td>Financial splits into institution + account sub-modes.</td><td>A library of local vectors + a routing controller.</td></tr>
+      <tr><td>Diffuse</td><td>No single PC / cluster split carries it (not shown — needs &gt;2D).</td><td>Low-rank steering subspace <code>Q</code>, not one vector.</td></tr>
+    </tbody>
+  </table>
+
+  <div class="pipeline">
+    <span class="step"><b>collect</b> activations</span><span class="arr">→</span>
+    <span class="step"><b>variance</b> hierarchy</span><span class="arr">→</span>
+    <span class="step"><b>flag</b> nuisance PCs</span><span class="arr">→</span>
+    <span class="step"><b>suppress</b></span><span class="arr">→</span>
+    <span class="step"><b>recover</b> regions</span><span class="arr">→</span>
+    <span class="step"><b>local</b> vectors</span><span class="arr">→</span>
+    <span class="step"><b>route</b> at inference</span>
+  </div>
+
+  <footer>
+    Toy: d=2, 160 samples, seeded · PCA = closed-form 2×2 eigendecomposition · k-means++ k=2, 8 restarts.
+    The real method runs this per layer in <span class="kbd">R^d</span> and recurses inside recovered regions. Built to explain — not to benchmark.
+  </footer>
+</section>
+
+</div>
+
+<script>
+"use strict";
+/* ---------- math core (mirrors the validated node prototype) ---------- */
+function rng(seed){return function(){seed|=0;seed=seed+0x6D2B79F5|0;let t=Math.imul(seed^seed>>>15,1|seed);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+function randn(r){let u=0,v=0;while(u===0)u=r();while(v===0)v=r();return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);}
+
+const TH=65*Math.PI/180, ES=[Math.cos(TH),Math.sin(TH)], EN=[-Math.sin(TH),Math.cos(TH)];
+const DSEP=1.6, SSEM=0.5, N=160;
+
+function genData(seed,sigmaN,multi){
+  const r=rng(seed),pts=[];
+  for(let i=0;i<N;i++){
+    const sense=i<N/2?0:1;                 // 0 river, 1 financial
+    let s=(sense===0?-DSEP/2:DSEP/2)+randn(r)*SSEM;
+    let n=randn(r)*sigmaN;
+    let sub=0;
+    if(multi&&sense===1){sub=(i%2===0?0:1);n+=(sub===0?-2.2:2.2);}
+    const x=s*ES[0]+n*EN[0], y=s*ES[1]+n*EN[1];
+    const tok=n+randn(r)*0.3;
+    pts.push({x,y,sense,sub,tok});
+  }
+  return pts;
+}
+function pca2(pts){
+  let mx=0,my=0;for(const p of pts){mx+=p.x;my+=p.y;}mx/=pts.length;my/=pts.length;
+  let a=0,b=0,c=0;for(const p of pts){const dx=p.x-mx,dy=p.y-my;a+=dx*dx;b+=dx*dy;c+=dy*dy;}
+  a/=pts.length;b/=pts.length;c/=pts.length;
+  const tr=(a+c)/2,dd=Math.sqrt(((a-c)/2)**2+b*b),l0=tr+dd,l1=tr-dd;
+  let v0;if(Math.abs(b)>1e-9)v0=[l0-c,b];else v0=(a>=c)?[1,0]:[0,1];
+  const nl=Math.hypot(v0[0],v0[1]);v0=[v0[0]/nl,v0[1]/nl];
+  return {mean:[mx,my],v0,v1:[-v0[1],v0[0]],l0:Math.max(l0,1e-9),l1:Math.max(l1,1e-9)};
+}
+function kmeans2(co,seed){
+  const r=rng(seed);let best=null,bI=Infinity;
+  for(let rs=0;rs<8;rs++){
+    let c0=co[Math.floor(r()*co.length)];
+    const d2=co.map(p=>(p[0]-c0[0])**2+(p[1]-c0[1])**2);
+    const sum=d2.reduce((a,b)=>a+b,0);let t=r()*sum,acc=0,idx=0;
+    for(let i=0;i<d2.length;i++){acc+=d2[i];if(acc>=t){idx=i;break;}}
+    let C=[c0.slice(),co[idx].slice()],as=new Array(co.length).fill(0);
+    for(let it=0;it<60;it++){
+      let ch=false;
+      for(let i=0;i<co.length;i++){const p=co[i];
+        const da=(p[0]-C[0][0])**2+(p[1]-C[0][1])**2,db=(p[0]-C[1][0])**2+(p[1]-C[1][1])**2;
+        const a=da<=db?0:1;if(a!==as[i]){as[i]=a;ch=true;}}
+      const s=[[0,0,0],[0,0,0]];
+      for(let i=0;i<co.length;i++){const a=as[i];s[a][0]+=co[i][0];s[a][1]+=co[i][1];s[a][2]++;}
+      for(let k=0;k<2;k++)if(s[k][2]>0)C[k]=[s[k][0]/s[k][2],s[k][1]/s[k][2]];
+      if(!ch&&it>0)break;
+    }
+    let inertia=0;for(let i=0;i<co.length;i++){const a=as[i];inertia+=(co[i][0]-C[a][0])**2+(co[i][1]-C[a][1])**2;}
+    if(inertia<bI){bI=inertia;best={as:as.slice(),C:C.map(x=>x.slice())};}
+  }
+  return best;
+}
+function purity(as,pts){const cnt=[[0,0],[0,0]];for(let i=0;i<pts.length;i++)cnt[as[i]][pts[i].sense]++;
+  return (Math.max(cnt[0][0],cnt[0][1])+Math.max(cnt[1][0],cnt[1][1]))/pts.length;}
+function corr(a,b){const n=a.length;let ma=0,mb=0;for(let i=0;i<n;i++){ma+=a[i];mb+=b[i];}ma/=n;mb/=n;
+  let sab=0,sa=0,sb=0;for(let i=0;i<n;i++){const da=a[i]-ma,db=b[i]-mb;sab+=da*db;sa+=da*da;sb+=db*db;}
+  return sab/Math.sqrt(sa*sb+1e-12);}
+
+/* ---------- model assembly ---------- */
+const CORR_T=0.55;
+function buildModel(seed,sigmaN,multi){
+  const pts=genData(seed,sigmaN,multi);
+  const {mean,v0,v1,l0,l1}=pca2(pts);
+  const rawKM=kmeans2(pts.map(p=>[p.x,p.y]),7);
+  const proj=pts.map(p=>(p.x-mean[0])*v0[0]+(p.y-mean[1])*v0[1]);
+  const cTok=Math.abs(corr(proj,pts.map(p=>p.tok)));
+  const res=pts.map(p=>{const dx=p.x-mean[0],dy=p.y-mean[1];const d=dx*v0[0]+dy*v0[1];return [mean[0]+dx-d*v0[0],mean[1]+dy-d*v0[1]];});
+  const resKM=kmeans2(res,7);
+  const rawP=purity(rawKM.as,pts), resP=purity(resKM.as,pts);
+  const masked=cTok>CORR_T;
+  // centroids by TRUE sense in residual (for steering vector) — orientation via labels (allowed: orient only)
+  function centByTrue(coords){const s=[[0,0,0],[0,0,0]];for(let i=0;i<pts.length;i++){const k=pts[i].sense;s[k][0]+=coords[i][0];s[k][1]+=coords[i][1];s[k][2]++;}
+    return [[s[0][0]/s[0][2],s[0][1]/s[0][2]],[s[1][0]/s[1][2],s[1][1]/s[1][2]]];}
+  const useCoords = masked?res:pts.map(p=>[p.x,p.y]);
+  const cTrue=centByTrue(useCoords);               // [riverCentroid, finCentroid]
+  // local (multi-region) centroids for financial sub-modes
+  const locals=[];
+  if(multi){
+    const sub=[[0,0,0],[0,0,0]];
+    for(let i=0;i<pts.length;i++){if(pts[i].sense===1){const k=pts[i].sub;sub[k][0]+=useCoords[i][0];sub[k][1]+=useCoords[i][1];sub[k][2]++;}}
+    for(let k=0;k<2;k++)locals.push([sub[k][0]/sub[k][2],sub[k][1]/sub[k][2]]);
+  }
+  const v0scale=Math.sqrt(l0), v1scale=Math.sqrt(l1);
+  return {pts,mean,v0,v1,v0scale,v1scale,rawKM,resKM,res,rawP,resP,cTok,masked,
+          varShare:l0/(l0+l1),cTrue,locals,useCoords};
+}
+
+/* ---------- canvas plotting ---------- */
+const WB=7; // world bounds [-WB,WB]
+function setup(cv){
+  const dpr=Math.min(window.devicePixelRatio||1,2);
+  const w=cv.clientWidth, h=parseInt(cv.getAttribute('height'));
+  cv.width=w*dpr; cv.height=h*dpr; cv.style.height=h+'px';
+  const ctx=cv.getContext('2d'); ctx.setTransform(dpr,0,0,dpr,0,0);
+  return {ctx,w,h};
+}
+function mapper(w,h){const pad=18,sx=(w-2*pad)/(2*WB),sy=(h-2*pad)/(2*WB),s=Math.min(sx,sy);
+  const cx=w/2,cy=h/2;return p=>[cx+p[0]*s,cy-p[1]*s];}
+function grid(ctx,w,h){ctx.clearRect(0,0,w,h);ctx.lineWidth=1;ctx.strokeStyle='rgba(168,214,232,0.06)';
+  const m=mapper(w,h);for(let g=-6;g<=6;g+=2){const a=m([g,-WB]),b=m([g,WB]);ctx.beginPath();ctx.moveTo(a[0],a[1]);ctx.lineTo(b[0],b[1]);ctx.stroke();
+    const c=m([-WB,g]),d=m([WB,g]);ctx.beginPath();ctx.moveTo(c[0],c[1]);ctx.lineTo(d[0],d[1]);ctx.stroke();}}
+function arrow(ctx,a,b,color,wd){ctx.strokeStyle=color;ctx.fillStyle=color;ctx.lineWidth=wd||2.5;
+  ctx.beginPath();ctx.moveTo(a[0],a[1]);ctx.lineTo(b[0],b[1]);ctx.stroke();
+  const ang=Math.atan2(b[1]-a[1],b[0]-a[0]),hl=9;
+  ctx.beginPath();ctx.moveTo(b[0],b[1]);ctx.lineTo(b[0]-hl*Math.cos(ang-0.4),b[1]-hl*Math.sin(ang-0.4));
+  ctx.lineTo(b[0]-hl*Math.cos(ang+0.4),b[1]-hl*Math.sin(ang+0.4));ctx.closePath();ctx.fill();}
+const COL={river:'#7fd0ff',fin:'#ffb454',nuis:'#e3678c',cyan:'#46b6d6',mint:'#74f0bd'};
+
+/* raw scatter + PCA axes */
+function drawRaw(M){
+  const cv=document.getElementById('cRaw');const {ctx,w,h}=setup(cv);grid(ctx,w,h);const m=mapper(w,h);
+  // PCA axes
+  const a0=m([M.mean[0]-M.v0[0]*M.v0scale*2,M.mean[1]-M.v0[1]*M.v0scale*2]);
+  const b0=m([M.mean[0]+M.v0[0]*M.v0scale*2,M.mean[1]+M.v0[1]*M.v0scale*2]);
+  ctx.lineWidth=2;ctx.setLineDash([6,4]);
+  ctx.strokeStyle=M.masked?COL.nuis:COL.cyan;ctx.beginPath();ctx.moveTo(a0[0],a0[1]);ctx.lineTo(b0[0],b0[1]);ctx.stroke();
+  const a1=m([M.mean[0]-M.v1[0]*M.v1scale*2,M.mean[1]-M.v1[1]*M.v1scale*2]);
+  const b1=m([M.mean[0]+M.v1[0]*M.v1scale*2,M.mean[1]+M.v1[1]*M.v1scale*2]);
+  ctx.strokeStyle=COL.cyan;ctx.globalAlpha=.5;ctx.beginPath();ctx.moveTo(a1[0],a1[1]);ctx.lineTo(b1[0],b1[1]);ctx.stroke();
+  ctx.globalAlpha=1;ctx.setLineDash([]);
+  // points: ring=true sense, fill=kmeans label (mapped so majority aligns)
+  const cnt=[[0,0],[0,0]];for(let i=0;i<M.pts.length;i++)cnt[M.rawKM.as[i]][M.pts[i].sense]++;
+  const lab2sense=[cnt[0][1]>cnt[0][0]?1:0, cnt[1][1]>cnt[1][0]?1:0];
+  for(let i=0;i<M.pts.length;i++){const p=m([M.pts[i].x,M.pts[i].y]);
+    const trueC=M.pts[i].sense===0?COL.river:COL.fin;
+    const kmC=lab2sense[M.rawKM.as[i]]===0?COL.river:COL.fin;
+    ctx.beginPath();ctx.arc(p[0],p[1],4.6,0,7);ctx.fillStyle=kmC;ctx.globalAlpha=.85;ctx.fill();ctx.globalAlpha=1;
+    ctx.lineWidth=1.6;ctx.strokeStyle=trueC;ctx.stroke();}
+  // label
+  document.getElementById('rawlbl').textContent='PC0 '+(M.masked?'≈ nuisance':'≈ semantic');
+}
+/* variance bars */
+function drawVar(M){
+  const cv=document.getElementById('cVar');const {ctx,w,h}=setup(cv);ctx.clearRect(0,0,w,h);
+  const total=M.v0scale**2+M.v1scale**2, share=[M.v0scale**2/total,M.v1scale**2/total];
+  const bw=w*0.26, gap=w*0.18, x0=w*0.5-bw-gap/2, base=h-46, top=34, H=base-top;
+  const labels=['PC0','PC1'];const cols=[M.masked?COL.nuis:COL.cyan,COL.cyan];
+  for(let k=0;k<2;k++){const x=x0+k*(bw+gap),bh=share[k]*H;
+    ctx.fillStyle=cols[k];ctx.globalAlpha=k===1?.55:1;ctx.fillRect(x,base-bh,bw,bh);ctx.globalAlpha=1;
+    ctx.fillStyle='#e8f2f6';ctx.font='600 13px "IBM Plex Mono"';ctx.textAlign='center';
+    ctx.fillText((share[k]*100).toFixed(0)+'%',x+bw/2,base-bh-9);
+    ctx.fillStyle='#7fa6b4';ctx.fillText(labels[k],x+bw/2,base+20);}
+  if(M.masked){ctx.fillStyle=COL.nuis;ctx.font='600 12px "IBM Plex Mono"';ctx.textAlign='center';
+    ctx.fillText('⚑ PC0 flagged: position-correlated',w/2,top-12);}
+  else {ctx.fillStyle=COL.mint;ctx.font='600 12px "IBM Plex Mono"';ctx.textAlign='center';
+    ctx.fillText('PC0 carries the sense — keep it',w/2,top-12);}
+}
+/* residual scatter + steering vector */
+function drawRes(M){
+  const cv=document.getElementById('cRes');const {ctx,w,h}=setup(cv);grid(ctx,w,h);const m=mapper(w,h);
+  const coords=M.masked?M.res:M.pts.map(p=>[p.x,p.y]);
+  const km=M.masked?M.resKM:M.rawKM;
+  const cnt=[[0,0],[0,0]];for(let i=0;i<M.pts.length;i++)cnt[km.as[i]][M.pts[i].sense]++;
+  const lab2sense=[cnt[0][1]>cnt[0][0]?1:0, cnt[1][1]>cnt[1][0]?1:0];
+  for(let i=0;i<M.pts.length;i++){const p=m(coords[i]);
+    const trueC=M.pts[i].sense===0?COL.river:COL.fin;
+    const kmC=lab2sense[km.as[i]]===0?COL.river:COL.fin;
+    ctx.beginPath();ctx.arc(p[0],p[1],4.6,0,7);ctx.fillStyle=kmC;ctx.globalAlpha=.85;ctx.fill();ctx.globalAlpha=1;
+    ctx.lineWidth=1.6;ctx.strokeStyle=trueC;ctx.stroke();}
+  // steering vector(s)
+  if(M.locals.length){ // multi-region local vectors river->each fin submode
+    for(const loc of M.locals){arrow(ctx,m(M.cTrue[0]),m(loc),COL.mint,3);}
+    ctx.fillStyle=COL.mint;ctx.font='600 11px "IBM Plex Mono"';ctx.textAlign='left';
+    ctx.fillText('local d × 2',m(M.locals[0])[0]+8,m(M.locals[0])[1]);
+  } else {
+    arrow(ctx,m(M.cTrue[0]),m(M.cTrue[1]),COL.mint,3.2);
+    const mid=m([(M.cTrue[0][0]+M.cTrue[1][0])/2,(M.cTrue[0][1]+M.cTrue[1][1])/2]);
+    ctx.fillStyle=COL.mint;ctx.font='600 12px "IBM Plex Mono"';ctx.textAlign='left';ctx.fillText('d',mid[0]+8,mid[1]-6);
+  }
+  document.getElementById('reslbl').textContent=M.masked?'PC0 removed':'no suppression (dominant)';
+}
+/* purity comparison bars */
+function drawBar(M){
+  const cv=document.getElementById('cBar');const {ctx,w,h}=setup(cv);ctx.clearRect(0,0,w,h);
+  const vals=[M.rawP,M.resP],labs=['raw H','residual'],base=h-46,top=40,H=base-top,bw=w*0.24,gap=w*0.16,x0=w*0.5-bw-gap/2;
+  // chance line
+  const cy=base-0.5*H;ctx.setLineDash([5,4]);ctx.strokeStyle='rgba(255,207,107,.6)';ctx.lineWidth=1.5;
+  ctx.beginPath();ctx.moveTo(x0-20,cy);ctx.lineTo(x0+2*bw+gap+20,cy);ctx.stroke();ctx.setLineDash([]);
+  ctx.fillStyle='#ffcf6b';ctx.font='11px "IBM Plex Mono"';ctx.textAlign='left';ctx.fillText('chance 0.5',x0+2*bw+gap-2,cy-6);
+  const better=M.resP>=M.rawP;
+  for(let k=0;k<2;k++){const x=x0+k*(bw+gap),bh=Math.max(2,vals[k]*H);
+    const col=k===0?'#9fc1cf':(better?COL.mint:COL.nuis);
+    ctx.fillStyle=col;ctx.fillRect(x,base-bh,bw,bh);
+    ctx.fillStyle='#e8f2f6';ctx.font='600 14px "Space Grotesk"';ctx.textAlign='center';
+    ctx.fillText(vals[k].toFixed(2),x+bw/2,base-bh-9);
+    ctx.fillStyle='#7fa6b4';ctx.font='12px "IBM Plex Mono"';ctx.fillText(labs[k],x+bw/2,base+20);}
+  ctx.fillStyle=better?COL.mint:COL.nuis;ctx.font='600 12px "IBM Plex Mono"';ctx.textAlign='center';
+  ctx.fillText(better?'suppression rescues senses ↑':'suppression deletes the signal ↓',w/2,top-14);
+}
+
+/* ---------- inference panel ---------- */
+let query=null, MODEL=null;
+function drawInf(M){
+  const cv=document.getElementById('cInf');const {ctx,w,h}=setup(cv);grid(ctx,w,h);const m=mapper(w,h);
+  // background points (faint) in original activation space
+  for(let i=0;i<M.pts.length;i++){const p=m([M.pts[i].x,M.pts[i].y]);
+    ctx.beginPath();ctx.arc(p[0],p[1],3.2,0,7);ctx.fillStyle=M.pts[i].sense===0?COL.river:COL.fin;ctx.globalAlpha=.28;ctx.fill();ctx.globalAlpha=1;}
+  // region centroids in original space
+  const oCoords=M.pts.map(p=>[p.x,p.y]);
+  function centOrig(filt){let sx=0,sy=0,c=0;for(let i=0;i<M.pts.length;i++)if(filt(i)){sx+=M.pts[i].x;sy+=M.pts[i].y;c++;}return [sx/c,sy/c];}
+  const cRiver=centOrig(i=>M.pts[i].sense===0);
+  // target regions (financial, possibly split)
+  let regions;
+  if(M.locals.length){
+    regions=[
+      {name:'fin·institution',c:centOrig(i=>M.pts[i].sense===1&&M.pts[i].sub===0)},
+      {name:'fin·account',c:centOrig(i=>M.pts[i].sense===1&&M.pts[i].sub===1)}
+    ];
+  } else {
+    regions=[{name:'financial',c:centOrig(i=>M.pts[i].sense===1)}];
+  }
+  // draw centroids
+  ctx.fillStyle=COL.river;const cr=m(cRiver);ctx.beginPath();ctx.arc(cr[0],cr[1],6,0,7);ctx.fill();
+  for(const r of regions){const cc=m(r.c);ctx.fillStyle=COL.fin;ctx.beginPath();ctx.arc(cc[0],cc[1],6,0,7);ctx.fill();
+    ctx.strokeStyle=COL.fin;ctx.lineWidth=1.5;ctx.beginPath();ctx.arc(cc[0],cc[1],11,0,7);ctx.stroke();}
+  // routing: pick nearest target region to query → local steering vector = region.c - cRiver
+  const alpha=parseFloat(document.getElementById('alpha').value);
+  let best=regions[0],bd=Infinity;
+  for(const r of regions){const d=(query[0]-r.c[0])**2+(query[1]-r.c[1])**2;if(d<bd){bd=d;best=r;}}
+  const dvec=[best.c[0]-cRiver[0],best.c[1]-cRiver[1]];
+  const nrm=Math.hypot(dvec[0],dvec[1]);const du=[dvec[0]/nrm,dvec[1]/nrm];
+  const hp=[query[0]+alpha*du[0]*nrm*0.55, query[1]+alpha*du[1]*nrm*0.55];
+  // trajectory
+  arrow(ctx,m(query),m(hp),COL.mint,3);
+  // query marker
+  const q=m(query);ctx.lineWidth=2.5;ctx.strokeStyle='#e8f2f6';ctx.beginPath();ctx.arc(q[0],q[1],9,0,7);ctx.stroke();
+  ctx.beginPath();ctx.arc(q[0],q[1],3,0,7);ctx.fillStyle='#e8f2f6';ctx.fill();
+  // h' marker
+  const hpp=m(hp);ctx.fillStyle=COL.mint;ctx.beginPath();ctx.arc(hpp[0],hpp[1],6,0,7);ctx.fill();
+  // predicted sense @ h'
+  const dR=(hp[0]-cRiver[0])**2+(hp[1]-cRiver[1])**2;
+  let dF=Infinity;for(const r of regions){const d=(hp[0]-r.c[0])**2+(hp[1]-r.c[1])**2;if(d<dF)dF=d;}
+  const sense=dF<dR?'financial':'river';
+  // membership p(river) via softmax over {river, nearest fin}
+  const beta=0.6;const dq_r=(query[0]-cRiver[0])**2+(query[1]-cRiver[1])**2;
+  const eR=Math.exp(-beta*dq_r),eF=Math.exp(-beta*bd);const pR=eR/(eR+eF);
+  document.getElementById('iRegion').textContent=best.name;
+  document.getElementById('iRegion').style.color=COL.fin;
+  document.getElementById('iSense').textContent=sense;
+  document.getElementById('iSense').style.color=sense==='financial'?COL.fin:COL.river;
+  document.getElementById('iP').textContent=pR.toFixed(2);
+  document.getElementById('inflbl').textContent='α = '+alpha.toFixed(2);
+}
+
+/* query drag */
+function attachDrag(){
+  const cv=document.getElementById('cInf');let dragging=false;
+  function toWorld(ev){const rect=cv.getBoundingClientRect();const x=ev.clientX-rect.left,y=ev.clientY-rect.top;
+    const w=cv.clientWidth,h=parseInt(cv.getAttribute('height'));const pad=18,s=Math.min((w-2*pad)/(2*WB),(h-2*pad)/(2*WB));
+    return [ (x-w/2)/s, -(y-h/2)/s ];}
+  cv.addEventListener('pointerdown',e=>{dragging=true;cv.setPointerCapture(e.pointerId);query=toWorld(e);drawInf(MODEL);});
+  cv.addEventListener('pointermove',e=>{if(dragging){query=toWorld(e);drawInf(MODEL);}});
+  cv.addEventListener('pointerup',e=>{dragging=false;});
+}
+
+/* ---------- wiring ---------- */
+let seed=42;
+function rebuild(){
+  const sigmaN=parseFloat(document.getElementById('sig').value);
+  const multi=document.getElementById('multi').checked;
+  MODEL=buildModel(seed,sigmaN,multi);
+  // stats
+  document.getElementById('sigVal').textContent=sigmaN.toFixed(2);
+  document.getElementById('sRaw').textContent=MODEL.rawP.toFixed(2);
+  document.getElementById('sRaw').style.color=MODEL.rawP>0.8?COL.mint:COL.nuis;
+  document.getElementById('sCorr').textContent=MODEL.cTok.toFixed(2);
+  document.getElementById('sCorr').style.color=MODEL.masked?COL.nuis:COL.mint;
+  document.getElementById('sVar').textContent=(MODEL.varShare*100).toFixed(0)+'%';
+  // verdict
+  const badge=document.getElementById('badge'),vt=document.getElementById('verdictText');
+  if(MODEL.masked){
+    badge.className='badge mask';badge.textContent='MASKED';
+    vt.innerHTML='Top axis is <b style="color:var(--nuis)">position</b>, not sense — corr(PC0, token_position) = <b class="mono">'+MODEL.cTok.toFixed(2)+'</b> &gt; 0.55. Raw k-means lands near chance (<b class="mono">'+MODEL.rawP.toFixed(2)+'</b>). Verdict: <b style="color:var(--mint)">suppress PC0</b>, then cluster the residual.';
+  } else {
+    badge.className='badge dom';badge.textContent='DOMINANT';
+    vt.innerHTML='Top axis already <b style="color:var(--mint)">carries the sense</b> — corr(PC0, token_position) = <b class="mono">'+MODEL.cTok.toFixed(2)+'</b> is low and raw k-means is clean (<b class="mono">'+MODEL.rawP.toFixed(2)+'</b>). Verdict: <b>steer directly</b>; suppressing PC0 here would delete the signal.';
+  }
+  drawRaw(MODEL);drawVar(MODEL);drawRes(MODEL);drawBar(MODEL);
+  if(!query) query=[MODEL.pts.find(p=>p.sense===0).x, MODEL.pts.find(p=>p.sense===0).y];
+  drawInf(MODEL);
+}
+document.getElementById('sig').addEventListener('input',rebuild);
+document.getElementById('multi').addEventListener('change',()=>{query=null;rebuild();});
+document.getElementById('alpha').addEventListener('input',()=>{document.getElementById('aVal').textContent=parseFloat(document.getElementById('alpha').value).toFixed(2);drawInf(MODEL);});
+document.getElementById('reseed').addEventListener('click',()=>{seed=Math.floor(Math.random()*99999);query=null;rebuild();});
+document.getElementById('resetq').addEventListener('click',()=>{query=[MODEL.pts.find(p=>p.sense===0).x,MODEL.pts.find(p=>p.sense===0).y];drawInf(MODEL);});
+window.addEventListener('resize',()=>{if(MODEL){drawRaw(MODEL);drawVar(MODEL);drawRes(MODEL);drawBar(MODEL);drawInf(MODEL);}});
+attachDrag();
+rebuild();
+</script>
+</body>
+</html>
