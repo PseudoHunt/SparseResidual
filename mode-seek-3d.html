@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mode-seek in 3D — deflate, then search the plane</title>
+<style>
+  :root{--bg:#07161d;--panel:#0e2630;--panel2:#123140;--ink:#e8f3f6;--dim:#8aa6b2;--rule:rgba(150,200,215,0.16);
+    --loud:#6f9aac;--seek:#4fe6a6;--m0:#ffb454;--m1:#6cc6ff;--accent:#46b6d6;--warn:#ffcf6b;--plane:#2a6c7a;}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);line-height:1.55;font-family:ui-sans-serif,system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+    background-image:radial-gradient(rgba(120,200,220,0.05) 1px,transparent 1px);background-size:30px 30px;}
+  .mono{font-family:ui-monospace,Menlo,Consolas,monospace}
+  .wrap{max-width:1180px;margin:0 auto;padding:28px 20px 90px}
+  .eyebrow{font:600 12px ui-monospace,Menlo,monospace;letter-spacing:.24em;text-transform:uppercase;color:var(--seek);margin-bottom:12px}
+  h1{font-weight:600;font-size:clamp(25px,4.2vw,40px);margin:0 0 12px;letter-spacing:-.02em;line-height:1.06}
+  h1 em{font-style:normal;color:var(--seek)}
+  .sub{max-width:700px;color:var(--dim);font-size:clamp(14px,1.8vw,16px)}
+  .sub b{color:var(--ink);font-weight:600}
+  .steps{display:flex;gap:8px;flex-wrap:wrap;margin:18px 0 0}
+  .step{flex:1;min-width:150px;background:var(--panel);border:1px solid var(--rule);border-radius:11px;padding:11px 13px;border-top:3px solid var(--rule)}
+  .step.on{border-top-color:var(--seek);background:var(--panel2)}
+  .step .n{font:600 11px ui-monospace,Menlo,monospace;color:var(--dim);letter-spacing:.1em}
+  .step.on .n{color:var(--seek)}
+  .step .t{font-weight:600;margin-top:3px;font-size:14.5px}
+  .step .d{font-size:12px;color:var(--dim);margin-top:2px}
+  .stage{display:grid;grid-template-columns:1.2fr 0.8fr;gap:18px;margin-top:18px}
+  @media(max-width:860px){.stage{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--rule);border-radius:16px;padding:16px}
+  .ctitle{font:600 12px ui-monospace,Menlo,monospace;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);margin:2px 0 10px;display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+  .ctitle .tag{font-size:11px;text-transform:none}
+  canvas{width:100%;display:block;border-radius:11px;background:#061219;border:1px solid var(--rule);touch-action:none}
+  .legend{display:flex;gap:14px;flex-wrap:wrap;font:500 11.5px ui-monospace,Menlo,monospace;color:var(--dim);margin-top:8px}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+  .dot{width:10px;height:10px;border-radius:50%}.ln{width:15px;height:3px;border-radius:2px}
+  .readouts{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}
+  .stat{background:var(--panel2);border:1px solid var(--rule);border-radius:10px;padding:11px 13px}
+  .stat .k{font:600 10.5px ui-monospace,Menlo,monospace;letter-spacing:.08em;text-transform:uppercase;color:var(--dim)}
+  .stat .v{font-size:22px;font-weight:600;margin-top:2px}.stat .v small{font-size:13px;color:var(--dim)}
+  .badge{display:inline-block;font:600 12px ui-monospace,Menlo,monospace;padding:4px 11px;border-radius:20px}
+  .b1{background:rgba(255,207,107,.14);color:var(--warn);border:1px solid var(--warn)}
+  .b2{background:rgba(79,230,166,.14);color:var(--seek);border:1px solid var(--seek)}
+  .controls{margin-top:14px;display:flex;flex-direction:column;gap:13px}
+  .row{display:flex;flex-wrap:wrap;gap:9px;align-items:center}
+  label.sl{font:600 11.5px ui-monospace,Menlo,monospace;color:var(--dim);display:flex;justify-content:space-between;width:100%}
+  label.sl b{color:var(--seek)}
+  input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:4px;border-radius:3px;background:linear-gradient(90deg,var(--loud),var(--seek));outline:none}
+  input[type=range]:disabled{opacity:.4}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:18px;height:18px;border-radius:50%;background:var(--ink);border:3px solid var(--seek);cursor:pointer}
+  input[type=range]::-moz-range-thumb{width:14px;height:14px;border-radius:50%;background:var(--ink);border:3px solid var(--seek);cursor:pointer}
+  button.btn{font:600 12px ui-monospace,Menlo,monospace;border-radius:9px;padding:10px 13px;cursor:pointer;border:1px solid var(--rule);background:var(--panel2);color:var(--ink);transition:.15s}
+  button.btn:hover{border-color:var(--seek)}
+  button.seek{border-color:var(--seek);color:var(--seek)} button.seek:hover{background:var(--seek);color:#062018}
+  button.loud{border-color:var(--loud);color:var(--loud)} button.loud:hover{background:var(--loud);color:#06181f}
+  .hint{font:500 12px ui-monospace,Menlo,monospace;color:var(--dim);margin-top:9px}.hint b{color:var(--seek)}
+  footer{margin-top:24px;color:var(--dim);font:500 12.5px ui-monospace,Menlo,monospace}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="eyebrow">3-D · deflate → search the residual plane</div>
+  <h1>Which space does mode-seek search? <em>This plane.</em></h1>
+  <p class="sub">The activations live in many dimensions. One axis is <b>loud</b> (huge spread — the common meaning). The two senses we care about are separated inside the <b>flat plane perpendicular to it</b>. <b>Deflate</b> removes the loud axis so the cloud collapses onto that plane; <b>mode-seek</b> then rotates a probe <em>within the plane</em> until the points split into two humps. Drag the cube to orbit.</p>
+
+  <div class="steps">
+    <div class="step on" id="st1"><div class="n">STEP 1</div><div class="t">The 3-D cloud</div><div class="d">a long loud axis; the senses hide in its cross-section</div></div>
+    <div class="step" id="st2"><div class="n">STEP 2 · deflate</div><div class="t">Flatten onto the plane</div><div class="d">remove the loud axis → search space is now 2-D</div></div>
+    <div class="step" id="st3"><div class="n">STEP 3 · mode-seek</div><div class="t">Rotate in the plane</div><div class="d">find the angle where it splits into two</div></div>
+  </div>
+
+  <div class="stage">
+    <div class="card">
+      <div class="ctitle"><span>3-D scope · drag to orbit</span><span class="tag mono" id="scopeTag">—</span></div>
+      <canvas id="scope" height="460"></canvas>
+      <div class="legend">
+        <span><span class="dot" style="background:var(--m0)"></span> sense A</span>
+        <span><span class="dot" style="background:var(--m1)"></span> sense B</span>
+        <span><span class="ln" style="background:var(--loud)"></span> loud axis</span>
+        <span><span class="ln" style="background:var(--plane)"></span> residual plane</span>
+        <span><span class="ln" style="background:var(--seek)"></span> probe d</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="ctitle"><span>Projection along the probe</span><span class="tag" id="modeBadge">—</span></div>
+      <canvas id="hist" height="172"></canvas>
+      <div class="ctitle" style="margin-top:14px"><span>Bimodality M(φ) · in the plane</span><span class="tag mono">0°–180°</span></div>
+      <canvas id="curve" height="132"></canvas>
+      <div class="readouts">
+        <div class="stat"><div class="k">probe angle φ (in plane)</div><div class="v" id="rPhi">—<small>°</small></div></div>
+        <div class="stat"><div class="k">bimodality M(φ)</div><div class="v" id="rM" style="color:var(--seek)">—</div></div>
+      </div>
+      <div class="controls">
+        <div style="width:100%">
+          <label class="sl">probe angle in plane &nbsp;<b id="phiVal">130°</b></label>
+          <input id="phi" type="range" min="0" max="180" step="1" value="130">
+        </div>
+        <div class="row">
+          <button class="btn loud" id="pcaBtn">point along loud axis (what PCA picks)</button>
+        </div>
+        <div class="row">
+          <button class="btn seek" id="deflBtn">deflate loud axis ⤵</button>
+          <button class="btn seek" id="snapBtn">snap probe to d* ▸</button>
+        </div>
+      </div>
+      <div class="hint" id="hint">Drag the cloud to see it's a long cigar. The loud axis is the length; the two senses are in the cross-section.</div>
+    </div>
+  </div>
+  <footer id="foot">—</footer>
+</div>
+
+<script>
+"use strict";
+function guard(fn){return function(){try{return fn.apply(this,arguments);}catch(e){try{console.error(e);}catch(_){}}};}
+function rng(s){return function(){s|=0;s=s+0x6D2B79F5|0;let t=Math.imul(s^s>>>15,1|s);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+function randn(r){let u=0,v=0;while(!u)u=r();while(!v)v=r();return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);}
+function bimod(z){const n=z.length;let mu=0;for(const v of z)mu+=v;mu/=n;let m2=0,m3=0,m4=0;
+  for(const v of z){const d=v-mu,d2=d*d;m2+=d2;m3+=d2*d;m4+=d2*d2;}m2/=n;m3/=n;m4/=n;const sd=Math.sqrt(m2)||1e-9;
+  const g1=m3/(sd*sd*sd),g2=m4/(m2*m2)-3;return (g1*g1+1)/(g2+3+1e-9);}   // Sarle's bimodality coefficient
+
+/* ---------- data: loud axis = x; senses split inside the y-z plane ---------- */
+const A0=40*Math.PI/180;                 // split direction angle within the plane
+const u=[Math.cos(A0),Math.sin(A0)], vv=[-Math.sin(A0),Math.cos(A0)];
+const PTS=(function(){const r=rng(4),a=[];const N=240;
+  for(let i=0;i<N;i++){const mode=i<N/2?-1:1;const x=randn(r)*3.0;            // loud axis
+    const along=mode*1.7+randn(r)*0.45, across=randn(r)*0.5;                   // bimodal along u, spread along v
+    const y=along*u[0]+across*vv[0], z=along*u[1]+across*vv[1];
+    a.push({x,y,z,mode});}return a;})();
+// in-plane bimodality grid M(phi)
+const NG=90, gM=[]; let mMax=0,mPk=0;
+for(let i=0;i<NG;i++){const ph=i/NG*Math.PI;const c=Math.cos(ph),s=Math.sin(ph);
+  const t=PTS.map(p=>p.y*c+p.z*s);const m=bimod(t);gM.push(m);if(m>mMax){mMax=m;mPk=ph;}}
+
+/* ---------- canvas registry (hardened) ---------- */
+const CANV=[];
+function register(id,draw){const cv=document.getElementById(id);if(!cv)return;const ctx=cv.getContext&&cv.getContext('2d');if(!ctx)return;
+  const h0=parseInt(cv.getAttribute('height'))||300;const o={cv,ctx,draw,w:0,h:h0,h0:h0};CANV.push(o);
+  if(typeof ResizeObserver!=='undefined'){try{new ResizeObserver(guard(function(){sizeOf(o);safe(o);})).observe(cv);}catch(_){}}return o;}
+function measureW(cv){return Math.round(cv.clientWidth||(cv.parentElement&&cv.parentElement.clientWidth)||(cv.getBoundingClientRect&&cv.getBoundingClientRect().width)||0);}
+function sizeOf(o){const dpr=Math.min(window.devicePixelRatio||1,2);let w=measureW(o.cv);if(w<2)w=600;const h=o.h0;
+  const bw=Math.max(1,Math.round(w*dpr)),bh=Math.max(1,Math.round(h*dpr));
+  if(o.cv.width!==bw)o.cv.width=bw;if(o.cv.height!==bh)o.cv.height=bh;o.cv.style.height=h+'px';o.w=w;o.h=h;o.ctx.setTransform(dpr,0,0,dpr,0,0);}
+function safe(o){try{o.draw(o.ctx,o.w,o.h);}catch(e){try{console.error('draw',o.cv.id,e);}catch(_){}}}
+function paintAll(){for(const o of CANV){sizeOf(o);safe(o);}}
+
+const COL={loud:'#6f9aac',seek:'#4fe6a6',m0:'#ffb454',m1:'#6cc6ff',ink:'#e8f3f6',dim:'#8aa6b2',rule:'rgba(150,200,215,0.16)',warn:'#ffcf6b',plane:'#2a6c7a'};
+/* ---------- state ---------- */
+let yaw=-0.7, pitch=0.42, deflate=0, phi=130*Math.PI/180, probeMode='loud'; // 'plane' | 'loud'
+
+/* ---------- 3D projection ---------- */
+function proj(p,cx,cy,s){let x=p[0],y=p[1],z=p[2];
+  let x1=x*Math.cos(yaw)+z*Math.sin(yaw), z1=-x*Math.sin(yaw)+z*Math.cos(yaw), y1=y;
+  let y2=y1*Math.cos(pitch)-z1*Math.sin(pitch), z2=y1*Math.sin(pitch)+z1*Math.cos(pitch);
+  return {sx:cx+x1*s, sy:cy-y2*s, d:z2};}
+function dcoord(p){return [p.x*(1-0.985*deflate), p.y, p.z];}   // deflate shrinks loud (x) axis
+
+function drawScope(ctx,w,h){ctx.clearRect(0,0,w,h);const cx=w/2,cy=h/2;
+  // auto scale to current extent (zooms in as it flattens)
+  let maxR=0;for(const p of PTS){const c=dcoord(p);maxR=Math.max(maxR,Math.hypot(c[0],c[1],c[2]));}
+  const s=(0.40*Math.min(w,h))/(maxR||1);
+  // residual plane (y-z): translucent quad + grid
+  const R=2.6;const corners=[[0,-R,-R],[0,R,-R],[0,R,R],[0,-R,R]].map(c=>proj(c,cx,cy,s));
+  ctx.beginPath();ctx.moveTo(corners[0].sx,corners[0].sy);for(let i=1;i<4;i++)ctx.lineTo(corners[i].sx,corners[i].sy);ctx.closePath();
+  ctx.fillStyle='rgba(42,108,122,0.16)';ctx.fill();ctx.strokeStyle='rgba(42,108,122,0.55)';ctx.lineWidth=1.4;ctx.stroke();
+  for(let g=-2;g<=2;g++){const a=proj([0,g,-R],cx,cy,s),b=proj([0,g,R],cx,cy,s);const c2=proj([0,-R,g],cx,cy,s),d2=proj([0,R,g],cx,cy,s);
+    ctx.strokeStyle='rgba(42,108,122,0.22)';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(a.sx,a.sy);ctx.lineTo(b.sx,b.sy);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(c2.sx,c2.sy);ctx.lineTo(d2.sx,d2.sy);ctx.stroke();}
+  // loud axis line (fades as deflated)
+  const La=4.2*(1-0.985*deflate);const l0=proj([-La,0,0],cx,cy,s),l1=proj([La,0,0],cx,cy,s);
+  ctx.strokeStyle=COL.loud;ctx.globalAlpha=0.4+0.6*(1-deflate);ctx.lineWidth=2.4;ctx.setLineDash([7,5]);
+  ctx.beginPath();ctx.moveTo(l0.sx,l0.sy);ctx.lineTo(l1.sx,l1.sy);ctx.stroke();ctx.setLineDash([]);ctx.globalAlpha=1;
+  if(deflate<0.6){ctx.fillStyle=COL.loud;ctx.font='600 11px ui-monospace,Menlo,monospace';ctx.fillText('loud axis',l1.sx+5,l1.sy);}
+  // points, sorted far->near
+  const sp=PTS.map(p=>{const c=dcoord(p);return {pr:proj(c,cx,cy,s),mode:p.mode,c};}).sort((a,b)=>a.pr.d-b.pr.d);
+  for(const o of sp){const dd=o.pr.d;const r=3.2+1.2*(dd/(maxR+1e-6));const al=0.55+0.4*((dd+maxR)/(2*maxR+1e-6));
+    ctx.beginPath();ctx.arc(o.pr.sx,o.pr.sy,Math.max(2,r),0,7);ctx.fillStyle=o.mode<0?COL.m0:COL.m1;ctx.globalAlpha=Math.min(1,al);ctx.fill();ctx.globalAlpha=1;}
+  // probe
+  let dir;if(probeMode==='loud')dir=[1,0,0];else dir=[0,Math.cos(phi),Math.sin(phi)];
+  const P=2.9;const a=proj([-dir[0]*P,-dir[1]*P,-dir[2]*P],cx,cy,s),b=proj([dir[0]*P,dir[1]*P,dir[2]*P],cx,cy,s);
+  ctx.strokeStyle=probeMode==='loud'?COL.loud:COL.seek;ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(a.sx,a.sy);ctx.lineTo(b.sx,b.sy);ctx.stroke();
+  ctx.fillStyle=ctx.strokeStyle;ctx.beginPath();ctx.arc(b.sx,b.sy,5,0,7);ctx.fill();
+  ctx.font='600 11px ui-monospace,Menlo,monospace';ctx.fillText(probeMode==='loud'?'loud':'d',b.sx+6,b.sy);
+  document.getElementById('scopeTag').textContent=(deflate>0.5?'plane view':'3-D view')+' · drag to orbit';
+}
+
+/* ---------- projection values for hist/curve ---------- */
+function projVals(){if(probeMode==='loud')return PTS.map(p=>p.x);const c=Math.cos(phi),s=Math.sin(phi);return PTS.map(p=>p.y*c+p.z*s);}
+function drawHist(ctx,w,h){ctx.clearRect(0,0,w,h);const z=projVals();
+  let lo=Math.min.apply(null,z),hi=Math.max.apply(null,z);const d=(hi-lo)||1;lo-=d*0.05;hi+=d*0.05;
+  const nb=30,pad=14,bw=(w-2*pad)/nb,base=h-20;const bins=[];for(let k=0;k<nb;k++)bins.push({a:0,b:0});
+  for(let i=0;i<z.length;i++){let idx=Math.min(nb-1,Math.max(0,((z[i]-lo)/(hi-lo)*nb)|0));PTS[i].mode<0?bins[idx].a++:bins[idx].b++;}
+  let mx=1;for(const bn of bins)mx=Math.max(mx,bn.a+bn.b);
+  ctx.strokeStyle=COL.rule;ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(pad,base);ctx.lineTo(w-pad,base);ctx.stroke();
+  for(let k=0;k<nb;k++){const x=pad+k*bw,ha=bins[k].a/mx*(base-14),hb=bins[k].b/mx*(base-14);
+    ctx.fillStyle=COL.m0;ctx.globalAlpha=.92;ctx.fillRect(x+1,base-ha,bw-2,ha);ctx.fillStyle=COL.m1;ctx.fillRect(x+1,base-ha-hb,bw-2,hb);ctx.globalAlpha=1;}
+  const M=bimod(z),two=M>0.55;const badge=document.getElementById('modeBadge');
+  badge.textContent=two?'2 modes detected':'1 hump';badge.className='tag badge '+(two?'b2':'b1');
+  document.getElementById('rM').textContent=M.toFixed(2);document.getElementById('rM').style.color=two?COL.seek:COL.warn;
+  document.getElementById('rPhi').innerHTML=(probeMode==='loud'?'—':(phi*180/Math.PI).toFixed(0))+'<small>'+(probeMode==='loud'?' (loud)':'°')+'</small>';
+}
+function drawCurve(ctx,w,h){ctx.clearRect(0,0,w,h);const pad=16,bx=pad,bw=w-2*pad,by=12,bh=h-32;
+  ctx.strokeStyle=COL.rule;ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(bx,by+bh);ctx.lineTo(bx+bw,by+bh);ctx.stroke();
+  ctx.strokeStyle=COL.seek;ctx.lineWidth=2.4;ctx.beginPath();
+  for(let i=0;i<NG;i++){const x=bx+(i/(NG-1))*bw,y=by+bh-(gM[i]/(mMax||1))*(bh-6);if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);}ctx.stroke();
+  // peak
+  const pi=Math.round(mPk/Math.PI*(NG-1));const px=bx+(pi/(NG-1))*bw,py=by+bh-(gM[pi]/(mMax||1))*(bh-6);
+  ctx.fillStyle=COL.seek;ctx.beginPath();ctx.arc(px,py,4,0,7);ctx.fill();ctx.fillStyle=COL.seek;ctx.font='600 11px ui-monospace,Menlo,monospace';ctx.fillText('d*',px-6,py-9);
+  // current phi marker (only in plane mode)
+  if(probeMode==='plane'){const cxp=bx+(phi/Math.PI)*bw;ctx.strokeStyle=COL.ink;ctx.globalAlpha=.6;ctx.setLineDash([4,4]);ctx.lineWidth=1.4;
+    ctx.beginPath();ctx.moveTo(cxp,by);ctx.lineTo(cxp,by+bh);ctx.stroke();ctx.setLineDash([]);ctx.globalAlpha=1;}
+  ctx.fillStyle=COL.dim;ctx.font='10px ui-monospace,Menlo,monospace';ctx.fillText('0°',bx,by+bh+14);ctx.textAlign='right';ctx.fillText('180°',bx+bw,by+bh+14);ctx.textAlign='left';
+}
+
+/* ---------- step highlight + foot ---------- */
+function updateSteps(){const s1=document.getElementById('st1'),s2=document.getElementById('st2'),s3=document.getElementById('st3');
+  s1.classList.toggle('on',deflate<0.5);s2.classList.toggle('on',deflate>=0.5);s3.classList.toggle('on',deflate>=0.95&&probeMode==='plane');
+  const foot=document.getElementById('foot');
+  if(probeMode==='loud')foot.textContent='The probe points along the loud axis — this is the direction PCA (variance) picks. Its projection is one fat blob: the two senses are invisible here.';
+  else if(deflate<0.5)foot.textContent='Drag to orbit. The cloud is a long cigar along the loud axis; the two senses sit in its thin cross-section. Deflate to collapse that axis.';
+  else foot.textContent='Loud axis removed — the cloud is now flat, living entirely in the 2-D residual plane. Rotate the probe within this plane: at φ≈'+(mPk*180/Math.PI).toFixed(0)+'° it splits into two.';
+}
+
+/* ---------- interaction ---------- */
+function attachOrbit(){const cv=document.getElementById('scope');let drag=false,lx=0,ly=0;
+  cv.addEventListener('pointerdown',guard(function(e){drag=true;try{cv.setPointerCapture(e.pointerId);}catch(_){}lx=e.clientX;ly=e.clientY;}));
+  cv.addEventListener('pointermove',guard(function(e){if(!drag)return;yaw+=(e.clientX-lx)*0.01;pitch+=(e.clientY-ly)*0.01;
+    pitch=Math.max(-1.3,Math.min(1.3,pitch));lx=e.clientX;ly=e.clientY;safe(CANV[0]);}));
+  cv.addEventListener('pointerup',function(){drag=false;});cv.addEventListener('pointercancel',function(){drag=false;});}
+
+let anim=null;
+function animate(prop,to,ms,after){if(anim)cancelAnimationFrame(anim);const from=({deflate,phi})[prop];let t0=null;
+  function step(ts){if(!t0)t0=ts;const k=Math.min(1,(ts-t0)/ms);const e=k<.5?2*k*k:1-Math.pow(-2*k+2,2)/2;const val=from+(to-from)*e;
+    if(prop==='deflate')deflate=val;else phi=val;
+    if(prop==='phi'){document.getElementById('phi').value=Math.round(phi*180/Math.PI);document.getElementById('phiVal').textContent=Math.round(phi*180/Math.PI)+'°';}
+    updateSteps();paintAll();if(k<1)anim=requestAnimationFrame(guard(step));else if(after)after();}
+  anim=requestAnimationFrame(guard(step));}
+
+/* ---------- wiring ---------- */
+guard(function(){
+  register('scope',drawScope);register('hist',drawHist);register('curve',drawCurve);
+  attachOrbit();
+  const phiEl=document.getElementById('phi');
+  phiEl.addEventListener('input',guard(function(){if(anim)cancelAnimationFrame(anim);probeMode='plane';phi=(+this.value)*Math.PI/180;
+    document.getElementById('phiVal').textContent=Math.round(+this.value)+'°';updateSteps();paintAll();}));
+  document.getElementById('pcaBtn').addEventListener('click',guard(function(){probeMode='loud';updateSteps();paintAll();}));
+  document.getElementById('deflBtn').addEventListener('click',guard(function(){probeMode='plane';
+    animate('deflate',deflate<0.5?1:0,650);this.textContent=deflate<0.5?'restore loud axis ⤴':'deflate loud axis ⤵';}));
+  document.getElementById('snapBtn').addEventListener('click',guard(function(){probeMode='plane';
+    if(deflate<0.5){animate('deflate',1,600,function(){animate('phi',mPk,520);});}else{animate('phi',mPk,520);}}));
+  updateSteps();paintAll();
+  [0,60,150,300,600,1000,1500].forEach(function(ms){setTimeout(guard(paintAll),ms);});
+  if(typeof requestAnimationFrame!=='undefined')requestAnimationFrame(guard(paintAll));
+  window.addEventListener('load',guard(paintAll));window.addEventListener('resize',guard(paintAll));
+})();
+</script>
+</body>
+</html>
