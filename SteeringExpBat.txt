@@ -1,0 +1,195 @@
+Experiment: Demonstrating AP Weakness and GMM Superiority Using the Polysemous Word “Bat”
+
+Objective
+
+The goal of this experiment is to show that Average Precision (AP)-based neuron selection can fail when a target concept is polysemous or multimodal. The word “bat” is used as a test case because it has at least two clearly different meanings:
+
+bat = flying animal
+bat = sports equipment used in cricket/baseball
+
+A single AP score assumes that the concept is represented monotonically by activation magnitude, meaning higher activation should correspond to stronger presence of the target concept. However, for a polysemous word, different meanings of the same word may occupy different activation regions. Therefore, a neuron or activation direction may be strongly related to “bat” while still receiving a weak AP score.
+
+The experiment tests whether GMM-based activation modeling can recover these multiple semantic regions better than AP.
+
+Hypothesis
+
+AP will perform well only when one sense of “bat” is represented by high activation and dominates the dataset. However, if different senses of “bat” activate different regions, AP will either select only one sense or produce a weak score.
+
+GMM should perform better because it does not assume that all “bat” examples must lie in one high-activation region. Instead, it can discover multiple activation modes corresponding to different meanings of the word.
+
+Expected behavior:
+
+bat-animal examples       → activation region A
+bat-sports examples       → activation region B
+non-bat examples          → activation region C
+
+AP may only detect one of these regions, while GMM can identify multiple regions simultaneously.
+
+Dataset Construction
+
+Create three groups of text examples.
+
+Group 1: Bat as an animal
+
+Examples:
+
+The bat flew out of the cave at night.
+A bat uses echolocation to find insects.
+The vampire watched the bat hanging upside down.
+The scientist studied the wings of the bat.
+A colony of bats lived inside the old temple.
+
+Group 2: Bat as sports equipment
+
+Examples:
+
+He swung the bat and hit the ball.
+The cricket bat was made of willow.
+She dropped the baseball bat after the match.
+The player chose a heavier bat for practice.
+The coach inspected the cracked bat.
+
+Group 3: Non-bat control examples
+
+Examples should be unrelated but structurally similar.
+
+The bird flew out of the tree at night.
+He kicked the ball across the field.
+The scientist studied the wings of the butterfly.
+The player chose a heavier racket for practice.
+The coach inspected the cracked helmet.
+
+The target token should be the word “bat” where possible. For control examples, use matched alternative nouns such as “bird,” “racket,” “helmet,” or “butterfly.”
+
+Activation Extraction
+
+Run all examples through the language model and extract activations from selected layers at the target token position.
+
+For each example, collect either:
+
+single-neuron activation
+
+or
+
+activation vector from residual stream / MLP output / attention output
+
+The simplest first experiment is to analyze individual neuron activations. A stronger experiment is to analyze low-dimensional activation vectors after PCA.
+
+AP-Based Baseline
+
+For each neuron, compute AP using the binary label:
+
+positive = all examples containing the word “bat”
+negative = non-bat control examples
+
+This creates the AP score:
+
+AP(activation, bat_label)
+
+Also compute the reverse direction:
+
+AP(-activation, bat_label)
+
+This is important because some neurons may represent one sense using low activation rather than high activation.
+
+The weakness of AP is that it treats all “bat” examples as one positive class:
+
+animal-bat + sports-bat = one label
+
+If animal-bat examples activate high and sports-bat examples activate low, AP may give a weak score even though the neuron is sense-relevant.
+
+GMM-Based Method
+
+Fit a Gaussian Mixture Model to the activation distribution.
+
+For a single neuron, fit a 1D GMM:
+
+GMM(a_i), where a_i is the activation value for example i
+
+For vector activations, first reduce dimensionality using PCA and then fit GMM:
+
+z_i = PCA(h_i)
+GMM(z_i)
+
+The GMM should discover multiple components such as:
+
+Component 1: animal-bat examples
+Component 2: sports-bat examples
+Component 3: non-bat control examples
+
+Unlike AP, GMM does not require both bat senses to have higher activation than controls. It only requires that the activation distribution contains separable regions.
+
+Evaluation
+
+Use the sense labels only for evaluation, not for fitting the GMM.
+
+Evaluate whether the discovered GMM clusters correspond to the known semantic groups:
+
+animal-bat
+sports-bat
+non-bat
+
+Use metrics such as:
+
+cluster purity
+normalized mutual information
+adjusted rand index
+component-sense enrichment
+
+Also inspect the top examples assigned to each GMM component.
+
+A successful result would look like:
+
+GMM Component 1:
+mostly animal-bat examples
+GMM Component 2:
+mostly sports-bat examples
+GMM Component 3:
+mostly non-bat controls
+
+while AP may produce a weak or incomplete result because it tries to rank all bat examples together.
+
+Expected Result Pattern
+
+A neuron may show the following activation pattern:
+
+animal-bat mean activation  ≈ +5
+sports-bat mean activation  ≈ -5
+non-bat mean activation     ≈ 0
+
+For AP:
+
+AP(activation, bat_label)  → detects animal-bat but misses sports-bat
+AP(-activation, bat_label) → detects sports-bat but misses animal-bat
+
+So AP can only capture one direction at a time.
+
+For GMM:
+
+Component near +5 → animal-bat
+Component near -5 → sports-bat
+Component near 0  → non-bat
+
+Therefore, GMM captures the full multimodal structure.
+
+Main Claim Demonstrated
+
+This experiment demonstrates that AP is limited when the target concept is not represented by a single monotonic activation direction.
+
+AP asks:
+
+Are all bat examples ranked above non-bat examples?
+
+GMM asks:
+
+Do bat examples occupy one or more distinct activation regions?
+
+For polysemous words such as “bat,” the second question is more appropriate. The word has multiple meanings, and those meanings may be represented in different activation regions.
+
+Therefore, GMM is superior to AP in this setting because it can discover multiple sense-specific activation modes, while AP either selects only one sense or collapses the multimodal structure into a weak ranking score.
+
+Conclusion
+
+The “bat” experiment provides a simple demonstration of why AP-based neuron selection is insufficient for polysemous concepts. AP assumes a single positive direction, while GMM models the activation distribution as multiple regions. If animal-bat and sports-bat examples occupy different activation modes, GMM can recover both modes, whereas AP will likely miss one or score the neuron poorly.
+
+This supports the broader claim that GMM-based activation modeling is more suitable than AP for concepts that are multimodal, polysemantic, or context-dependent.
