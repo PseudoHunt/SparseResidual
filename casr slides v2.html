@@ -1,0 +1,933 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CASR — The Optimizer in Four Ideas</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --outer:#131416;        /* page behind the slide card */
+  --slide:#212326;        /* slide card */
+  --card:#1A1C1E;         /* inner panels */
+  --line:#33373B;         /* panel borders */
+  --txt:#F2F5F4;          /* headings / primary */
+  --body:#A9B0B4;         /* body copy */
+  --dim:#7C8388;          /* tiny labels */
+  --green:#45E08A;        /* primary accent */
+  --green-soft:#8FF7B4;   /* secondary accent */
+  --green-deep:#17734A;
+  --white:#F2F5F4;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  font-family:'Inter',sans-serif;color:var(--body);
+  background:var(--outer);overflow:hidden;line-height:1.6;
+}
+/* ---------- deck / slide card ---------- */
+#deck{position:relative;height:100%}
+.slide{position:absolute;inset:0;display:none;overflow-y:auto;padding:14px 12px 96px}
+.slide.active{display:block}
+.slidecard{
+  position:relative;max-width:960px;margin:0 auto;
+  background:var(--slide);border-radius:26px;
+  padding:20px 26px 26px;min-height:calc(100dvh - 118px);
+  display:flex;flex-direction:column;
+}
+.chrome{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px}
+.logo{display:flex;align-items:center;gap:9px;font-family:'Poppins',sans-serif;font-weight:600;font-size:15px;color:var(--txt)}
+.mark{width:26px;height:26px;border-radius:50%;background:conic-gradient(from 210deg,#0F5C3B,#45E08A,#8FF7B4,#0F5C3B)}
+.tag{font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.12em;color:var(--dim)}
+.content{flex:1}
+.footerbar{display:flex;justify-content:space-between;align-items:center;margin-top:26px;font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:.1em;color:var(--dim)}
+/* ---------- type ---------- */
+h1{font-family:'Poppins',sans-serif;font-weight:700;color:var(--txt);font-size:clamp(32px,6.4vw,56px);line-height:1.08;letter-spacing:-.01em}
+h2{font-family:'Poppins',sans-serif;font-weight:600;color:var(--txt);font-size:clamp(23px,4.4vw,33px);line-height:1.16;margin-bottom:12px}
+.g{color:var(--green)}
+p{max-width:64ch;margin:10px 0;font-size:clamp(14.5px,2.3vw,16px)}
+p.small{font-size:13px;color:var(--dim)}
+strong{color:var(--txt);font-weight:600}
+.w{color:var(--txt)}
+code,.mono{font-family:'IBM Plex Mono',monospace;font-size:.92em}
+code{background:var(--card);border:1px solid var(--line);border-radius:5px;padding:1px 6px;color:var(--green-soft);white-space:nowrap}
+.eyebrow{font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:var(--green);margin-bottom:10px}
+.ideatag{
+  display:inline-block;font-family:'Poppins',sans-serif;font-size:12px;font-weight:600;
+  letter-spacing:.08em;padding:6px 14px;border-radius:999px;background:var(--green);color:#0D2A1B;margin-bottom:14px;
+}
+.formula{
+  font-family:'IBM Plex Mono',monospace;font-size:clamp(13.5px,2.5vw,16.5px);font-weight:600;color:var(--txt);
+  background:var(--card);border:1px solid var(--line);border-left:4px solid var(--green);
+  border-radius:12px;padding:13px 16px;margin:15px 0;overflow-x:auto;white-space:nowrap;
+}
+.formula .lbl{display:block;font-size:10.5px;font-weight:600;letter-spacing:.13em;color:var(--dim);margin-bottom:5px;white-space:normal;text-transform:uppercase}
+.formula .g{color:var(--green)}
+/* ---------- panels & widgets ---------- */
+.panel{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:14px;margin:15px 0}
+canvas{display:block;width:100%;height:auto}
+button{
+  font-family:'Poppins',sans-serif;font-size:13px;font-weight:600;
+  padding:9px 18px;border:0;border-radius:999px;background:var(--green);color:#0D2A1B;
+  cursor:pointer;letter-spacing:.03em;
+}
+button.secondary{background:transparent;color:var(--green);border:1.5px solid var(--green)}
+button:hover{filter:brightness(1.08)}
+button:focus-visible,input:focus-visible{outline:3px solid var(--green-soft);outline-offset:2px}
+.controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:8px 0 6px}
+input[type=range]{flex:1;min-width:150px;accent-color:var(--green);height:26px}
+.readrow{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.ro{border:1px solid var(--line);background:var(--slide);border-radius:10px;padding:7px 12px;min-width:96px}
+.ro .k{font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim)}
+.ro .v{font-family:'IBM Plex Mono',monospace;font-size:18px;font-weight:600;color:var(--txt)}
+.ro .v.g{color:var(--green)}
+table{width:100%;border-collapse:collapse;font-family:'IBM Plex Mono',monospace;font-size:clamp(11px,2.1vw,13.5px);margin:14px 0;background:var(--card);border-radius:12px;overflow:hidden}
+th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;color:var(--body)}
+th{font-size:10px;letter-spacing:.08em;text-transform:uppercase;background:var(--slide);color:var(--dim)}
+td strong{color:var(--green)}
+.walkline{font-family:'IBM Plex Mono',monospace;font-size:clamp(13px,2.7vw,17px);font-weight:600;color:var(--green-soft);margin-top:10px;min-height:1.5em;word-wrap:break-word}
+.ledger{list-style:none;counter-reset:st}
+.ledger li{counter-increment:st;margin:9px 0;padding:10px 12px;background:var(--card);border:1px solid var(--line);border-radius:12px;font-size:clamp(13px,2.3vw,15px)}
+.ledger li::before{content:counter(st);font-family:'Poppins',sans-serif;font-weight:700;display:inline-block;width:22px;height:22px;line-height:22px;text-align:center;background:var(--green);color:#0D2A1B;border-radius:50%;margin-right:10px;font-size:11.5px}
+.ledger .mono{font-weight:600;color:var(--txt)}
+.ledger .mono .g{color:var(--green)}
+/* ---------- hero (green aurora) ---------- */
+.hero .slidecard{
+  justify-content:center;overflow:hidden;
+  background:
+    radial-gradient(65% 85% at 18% 25%, rgba(69,224,138,.75) 0%, transparent 62%),
+    radial-gradient(55% 75% at 82% 12%, rgba(15,92,59,.9) 0%, transparent 66%),
+    radial-gradient(75% 95% at 62% 88%, rgba(29,163,95,.8) 0%, transparent 62%),
+    linear-gradient(135deg,#0B3D28 0%,#12472F 45%,#0C1310 100%);
+}
+.hero .slidecard::before{
+  content:"";position:absolute;right:-180px;bottom:-220px;width:560px;height:560px;
+  border:2px solid rgba(242,245,244,.14);border-radius:50%;pointer-events:none;
+}
+.hero .chrome .tag,.hero .footerbar{color:rgba(242,245,244,.65)}
+.hero h1{color:#fff}
+.hero p{color:rgba(242,245,244,.82)}
+.hero .eyebrow{color:#CFF8DF}
+.heromid{padding:9vh 4px}
+/* ---------- agenda ---------- */
+.agendagrid{display:grid;grid-template-columns:1fr 1.15fr;gap:0;border-radius:20px;overflow:hidden;min-height:420px}
+.agleft{
+  padding:28px 24px;display:flex;align-items:flex-end;
+  background:
+    radial-gradient(70% 80% at 25% 20%, rgba(69,224,138,.8) 0%, transparent 60%),
+    radial-gradient(60% 80% at 80% 90%, rgba(23,115,74,.9) 0%, transparent 65%),
+    linear-gradient(160deg,#0E4029,#0A100D);
+}
+.agleft h2{color:#fff;font-size:clamp(26px,4.6vw,38px)}
+.agright{background:#F2F5F4;padding:16px 22px}
+.agrow{
+  display:grid;grid-template-columns:1fr 58px;align-items:center;gap:10px;width:100%;
+  padding:13px 4px;border:0;border-bottom:1px solid #D6DCD9;background:transparent;
+  text-align:left;cursor:pointer;border-radius:0;color:#1B2733;
+}
+.agrow:hover{filter:none;background:#E7EEEA}
+.agrow:last-child{border-bottom:0}
+.agrow .sec{font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#7C8388;display:block}
+.agrow .nm{font-family:'Poppins',sans-serif;font-weight:600;font-size:clamp(14px,2.6vw,18px);color:#141A18}
+.agrow .num{font-family:'Poppins',sans-serif;font-weight:700;font-size:clamp(20px,3.6vw,28px);color:#141A18;text-align:right}
+@media(max-width:640px){.agendagrid{grid-template-columns:1fr}.agleft{min-height:150px}}
+/* ---------- eq stack / recap ---------- */
+.eqstack{display:grid;gap:8px;margin:15px 0}
+.eqline{display:grid;grid-template-columns:30px 1fr;gap:10px;align-items:center;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:9px 12px}
+.eqline .b{font-family:'Poppins',sans-serif;font-weight:700;font-size:12px;width:26px;height:26px;display:flex;align-items:center;justify-content:center;border-radius:50%;background:var(--green);color:#0D2A1B}
+.eqline .b.n{background:var(--line);color:var(--body)}
+.eqline .eq{font-family:'IBM Plex Mono',monospace;font-weight:600;color:var(--txt);font-size:clamp(12px,2.4vw,15.5px);overflow-x:auto;white-space:nowrap}
+.eqline .why{grid-column:2;font-size:12px;color:var(--dim)}
+.recap{display:grid;gap:10px;margin-top:12px}
+.recap .row{display:grid;grid-template-columns:38px 1fr;gap:12px;align-items:start;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 14px}
+.recap .n{font-family:'Poppins',sans-serif;font-weight:700;font-size:17px;width:34px;height:34px;display:flex;align-items:center;justify-content:center;border-radius:50%;background:var(--green);color:#0D2A1B}
+.recap p{margin:2px 0;font-size:14px}
+.hint{font-family:'IBM Plex Mono',monospace;font-size:12px;color:rgba(242,245,244,.6);margin-top:26px}
+/* ---------- HUD ---------- */
+#hud{position:fixed;left:0;right:0;bottom:0;z-index:10;background:#17181A;border-top:1px solid #2C2F32;
+  padding:9px 14px calc(9px + env(safe-area-inset-bottom))}
+.hudrow{display:flex;align-items:center;gap:12px;max-width:960px;margin:0 auto}
+.navbtn{padding:7px 14px;font-size:15px;line-height:1}
+#dots{flex:1;display:flex;gap:6px;justify-content:center;flex-wrap:wrap}
+.dot{width:8px;height:8px;border-radius:50%;border:1.5px solid var(--dim);background:transparent;padding:0;min-width:0}
+.dot:hover{filter:none}
+.dot.on{background:var(--green);border-color:var(--green)}
+#stack{display:flex;gap:5px}
+.chip{font-family:'IBM Plex Mono',monospace;font-size:9.5px;font-weight:700;letter-spacing:.05em;
+  padding:4px 7px;border-radius:6px;border:1.5px solid #33373B;color:#4A4F53}
+.chip.lit{border-color:var(--green);color:var(--green)}
+#count{font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--dim);min-width:44px;text-align:right}
+@media(max-width:600px){#dots{display:none}.slidecard{padding:16px 16px 20px}}
+</style>
+</head>
+<body>
+<div id="deck">
+
+<!-- ============ 1 · HERO ============ -->
+<section class="slide hero">
+ <div class="slidecard">
+  <div class="chrome"><span class="logo"><span class="mark"></span>CASR°</span><span class="tag">ICLR | 2027</span></div>
+  <div class="content heromid">
+    <div class="eyebrow">Confidence-gated Annealed Sign Rounding</div>
+    <h1>The optimizer,<br>in four ideas</h1>
+    <p style="margin-top:20px;font-size:17px">Every weight's rounding variable must finish at <strong style="color:#fff">0</strong> or <strong class="g">1</strong>. These slides build the machinery that gets it there — one idea per slide, each idea one symbol in the final equation.</p>
+    <div class="hint">→ arrow key, swipe, or the buttons below</div>
+  </div>
+  <div class="footerbar"><span>CASR · SIGN ROUNDING</span><span class="pgnum"></span></div>
+ </div>
+</section>
+
+<!-- ============ 2 · AGENDA ============ -->
+<section class="slide">
+ <div class="slidecard">
+  <div class="chrome"><span class="logo"><span class="mark"></span>CASR°</span><span class="tag">ICLR | 2027</span></div>
+  <div class="content">
+    <div class="agendagrid">
+      <div class="agleft"><h2>Outline /<br>Agenda</h2></div>
+      <div class="agright" id="agRows"></div>
+    </div>
+  </div>
+  <div class="footerbar"><span>CASR · SIGN ROUNDING</span><span class="pgnum"></span></div>
+ </div>
+</section>
+
+<!-- ============ 3 · SETUP ============ -->
+<section class="slide">
+ <div class="slidecard">
+  <div class="chrome"><span class="logo"><span class="mark"></span>CASR°</span><span class="tag">ICLR | 2027</span></div>
+  <div class="content">
+    <div class="eyebrow">01 · The setup</div>
+    <h2>One number, <span class="g">two walls</span></h2>
+    <p>Each weight has a rounding variable <code>h</code>, a number between 0 and 1. It decides whether the weight rounds down or up:</p>
+    <div class="formula"><span class="lbl">quantized weight</span>ŵ = s · ( ⌊w/s⌋ + h )&nbsp;&nbsp;&nbsp;h must end at <span class="w">0</span> or <span class="g">1</span></div>
+    <p>During training <code>h</code> can sit anywhere in between — this one sits at <strong>0.6</strong>. That's a <em>guess</em>, still being tuned. By the end it has to be touching a wall.</p>
+    <div class="panel"><canvas id="cv-track" width="1720" height="260" role="img" aria-label="A ball at position 0.6 on a track between a wall labeled 0 and a wall labeled 1"></canvas></div>
+    <p>The optimizer's entire job: <strong>walk this ball to one of the two walls</strong> — and pick the right wall.</p>
+  </div>
+  <div class="footerbar"><span>CASR · SIGN ROUNDING</span><span class="pgnum"></span></div>
+ </div>
+</section>
+
+<!-- ============ 4 · IDEA 1 WALK ============ -->
+<section class="slide" data-lit="1">
+ <div class="slidecard">
+  <div class="chrome"><span class="logo"><span class="mark"></span>CASR°</span><span class="tag">ICLR | 2027</span></div>
+  <div class="content">
+    <span class="ideatag">IDEA 1 / 4 — WALK</span>
+    <h2>Nudge it a little, <span class="g">every step</span></h2>
+    <div class="formula"><span class="lbl">the update — done every step</span>h ← h − η · sign(m)</div>
+    <p><code>η</code> is the <strong>size of one nudge</strong> (small — 0.05 here). <code>sign(m)</code> is the <strong>direction</strong>, just +1 or −1. Each step, <code>h</code> moves one small fixed step left or right. Repeat, and the number walks to an end:</p>
+    <div class="panel">
+      <div class="controls"><button id="walkBtn">▶ Walk it</button><button id="walkReset" class="secondary">↺ Reset</button></div>
+      <canvas id="cv-walk" width="1720" height="240" role="img" aria-label="Animation of the ball stepping from 0.6 to 1 in equal increments"></canvas>
+      <div class="walkline" id="walkTrail">0.60</div>
+    </div>
+    <p>Same-size step every time — only the <em>direction</em> is decided. A ball at 0.3 would walk the other way: 0.30 → 0.25 → … → 0.</p>
+  </div>
+  <div class="footerbar"><span>CASR · SIGN ROUNDING</span><span class="pgnum"></span></div>
+ </div>
+</section>
+
+<!-- ============ 5 · THE PUSH g ============ -->
+<section class="slide" data-lit="1">
+ <div class="slidecard">
+  <div class="chrome"><span class="logo"><span class="mark"></span>CASR°</span><span class="tag">ICLR | 2027</span></div>
+  <div class="content">
+    <div class="eyebrow">02 · Inside the direction</div>
+    <h2>Two forces add into one push, <span class="g mono">g</span></h2>
+    <div class="formula"><span class="lbl">the push on one weight</span>g = g<sub>rec</sub> + λ(t) · gate · (−sign(h − 0.5))</div>
+    <p><strong>Force 1 — tuning</strong> (<code>g_rec</code>): keep the layer's output accurate. It pushes <code>h</code> toward whatever value reconstructs best, and it's <em>noisy</em> — it jitters with every calibration minibatch. <span class="w">Where this number actually comes from is the next two slides.</span></p>
+    <p><strong>Force 2 — the pull</strong>: push <code>h</code> toward its <em>nearest wall</em>. The factor <code>−sign(h − 0.5)</code> just means "point at the closest end".</p>
+    <div class="panel"><canvas id="cv-forces" width="1720" height="300" role="img" aria-label="A ball with two labeled arrows: a tuning force and a pull toward the nearest wall"></canvas></div>
+  </div>
+  <div class="footerbar"><span>CASR · SIGN ROUNDING</span><span class="pgnum"></span></div>
+ </div>
+</section>
+
+<!-- ============ 6 · WHERE g_rec COMES FROM ============ -->
+<section class="slide" data-lit="1">
+ <div class="slidecard">
+  <div class="chrome"><span class="logo"><span class="mark"></span>CASR°</span><span class="tag">ICLR | 2027</span></div>
+  <div class="content">
+    <div class="eyebrow">02 · The tuning force</div>
+    <h2>Where <span class="g mono">g_rec</span> comes from</h2>
+    <p>Run the same calibration input <code>X</code> through the block twice: once with the original full-precision weights, once with the quantized ones. Compare the outputs.</p>
+    <div class="panel"><canvas id="cv-block" width="1720" height="420" role="img" aria-label="Block diagram: calibration input feeds both the full-precision weights and the quantized weights; their outputs are compared and the error gradient flows back to h"></canvas></div>
+    <div class="formula"><span class="lbl">reconstruction loss & its gradient (one linear layer)</span>L = ‖ŷ − y‖²&nbsp;&nbsp;→&nbsp;&nbsp;g_rec = ∂L/∂h = <span class="g">2s · Σ (error · input)</span></div>
+    <p>Only one thing in <code>ŷ</code> depends on <code>h</code>, and linearly: <code>ŵ = s(⌊w/s⌋ + h)</code>, so <code>∂ŵ/∂h = s</code>. The gradient is just <strong>the output error times the input it rode in on</strong>, scaled by the step size <code>s</code>. If raising <code>h</code> would shrink the block's error, <code>g_rec</code> comes out negative — and descent raises <code>h</code>.</p>
+  </div>
+  <div class="footerbar"><span>CASR · SIGN ROUNDING</span><span class="pgnum"></span></div>
+ </div>
+</section>
+
+<!-- ============ 7 · g_rec NUMERIC EXAMPLE ============ -->
+<section class="slide" data-lit="1">
+ <div class="slidecard">
+  <div class="chrome"><span class="logo"><span class="mark"></span>CASR°</span><span class="tag">ICLR | 2027</span></div>
+  <div class="content">
+    <div class="eyebrow">02 · The tuning force, with numbers</div>
+    <h2>One weight, one input: <span class="g mono">g_rec</span> by hand</h2>
+    <p class="small">Setup: scale s = 0.1, original weight w = 0.53 → ⌊w/s⌋ = 5, so ŵ = 0.1·(5 + h). One calibration input x = 2, full-precision output y = 0.53·2 = 1.06. Current h = 0.6.</p>
+    <ol class="ledger">
+      <li><span class="mono">ŷ = 0.1·(5 + 0.6)·2 = 1.12</span> — the quantized output overshoots.</li>
+      <li>Error: <span class="mono">e = ŷ − y = 1.12 − 1.06 = <span class="g">+0.06</span></span>. Loss <span class="mono">L = e² = 0.0036</span>.</li>
+      <li><span class="mono">g_rec = 2·e·(s·x) = 2·0.06·0.2 = <span class="g">+0.024</span></span> — positive, so descent <strong>lowers h</strong>. Correct: the output was too big.</li>
+      <li>Where does the force vanish? <span class="mono">e = 0</span> at <span class="mono">h* = 0.3</span> — exactly the true remainder <span class="mono">w/s − 5 = 0.3</span>. Alone, tuning just recovers round-to-nearest.</li>
+    </ol>
+    <p><strong>So why learn h at all?</strong> In a real layer thousands of weights share each output error. Weight A's best <code>h</code> can shift off its remainder to <em>cancel</em> weight B's rounding error — that compensation is the entire win of adaptive rounding.</p>
+    <p><strong>And the noise?</strong> Each minibatch is a different <code>x</code>, so <code>g_rec</code> jitters step to step — the jitter that momentum smooths on the next slide. (In the simulation, all of this is stood in for by a spring: <code>g_rec ≈ curv·(h − h*) + noise</code>.)</p>
+  </div>
+  <div class="footerbar"><span>CASR · SIGN ROUNDING</span><span class="pgnum"></span></div>
+ </div>
+</section>
+
+<!-- ============ 8 · MOMENTUM ============ -->
+<section class="slide" data-lit="1">
+ <div class="slidecard">
+  <div class="chrome"><span class="logo"><span class="mark"></span>CASR°</span><span class="tag">ICLR | 2027</span></div>
+  <div class="content">
+    <div class="eyebrow">02 · The missing link</div>
+    <h2><span class="g mono">m</span> is a running average of recent <span class="mono w">g</span></h2>
+    <div class="formula"><span class="lbl">each step, in this order</span>①  g = forces&nbsp;&nbsp;&nbsp;②  m ← 0.9·m + 0.1·g&nbsp;&nbsp;&nbsp;③  h ← h − η·sign(m)</div>
+    <p>Keep 90% of the old <code>m</code>, fold in 10% of the fresh <code>g</code>. <code>m</code> becomes a <strong>memory of recent pushes</strong>: opposite jitters cancel inside the average, so <code>sign(m)</code> stays a stable direction.</p>
+    <div class="panel">
+      <div class="controls"><button id="momBtn">▶ Feed it noisy pushes</button></div>
+      <canvas id="cv-mom" width="1720" height="430" role="img" aria-label="Chart: noisy g values as dots jumping above and below zero while the running average m stays smoothly positive"></canvas>
+    </div>
+    <table>
+      <thead><tr><th>step</th><th>g (noisy)</th><th>m = 0.9·m + 0.1·g</th><th>sign(m)</th></tr></thead>
+      <tbody>
+        <tr><td>1</td><td>+0.30</td><td>0.9·0.100 + 0.1·(+0.30) = 0.120</td><td>+1</td></tr>
+        <tr><td>2</td><td><strong>−0.20</strong></td><td>0.9·0.120 + 0.1·(−0.20) = 0.088</td><td><strong>+1</strong></td></tr>
+        <tr><td>3</td><td>+0.05</td><td>0.9·0.088 + 0.1·(+0.05) = 0.084</td><td>+1</td></tr>
+        <tr><td>4</td><td>+0.40</td><td>0.9·0.084 + 0.1·(+0.40) = 0.116</td><td>+1</td></tr>
+      </tbody>
+    </table>
+    <p>Step 2's push swung negative — but <code>m</code> stayed positive, so the ball never flipped direction. One bad minibatch can't jerk the walk around.</p>
+  </div>
+  <div class="footerbar"><span>CASR · SIGN ROUNDING</span><span class="pgnum"></span></div>
+ </div>
+</section>
+
+<!-- ============ 9 · IDEA 2 SCHEDULE ============ -->
+<section class="slide" data-lit="12">
+ <div class="slidecard">
+  <div class="chrome"><span class="logo"><span class="mark"></span>CASR°</span><span class="tag">ICLR | 2027</span></div>
+  <div class="content">
+    <span class="ideatag">IDEA 2 / 4 — SCHEDULE</span>
+    <h2><span class="g">λ(t)</span> — the pull starts near zero and turns up</h2>
+    <p>Why not round 0.6 → 1 instantly? Because 0.6 is a guess still being tuned; commit too early and you lock in the wrong wall. So the pull is a <strong>dial</strong>: off at the start, strong by the end. Drag training forward and watch the floor's middle rise into a hill:</p>
+    <div class="panel">
+      <div class="controls"><span class="mono" style="font-size:12px;color:var(--dim)">training progress t</span>
+        <input type="range" id="hillSlider" min="0" max="1000" value="0" aria-label="Training progress"></div>
+      <canvas id="cv-hill" width="1720" height="430" role="img" aria-label="An energy landscape morphing from a single dip into a hill with wells at both walls; a ball rolls to the nearest wall"></canvas>
+      <div class="readrow">
+        <div class="ro"><div class="k">step</div><div class="v" id="hillStep">0</div></div>
+        <div class="ro"><div class="k">λ(t)</div><div class="v g" id="hillLam">0.02</div></div>
+        <div class="ro"><div class="k">ball h</div><div class="v" id="hillH">0.62</div></div>
+      </div>
+    </div>
+    <p><strong>Early</strong> (λ ≈ 0): the ball rests in its tuning dip. <strong>Late</strong> (λ large): the hill dominates and the ball rolls to its nearest wall. λ(t) rising with t <em>is</em> the schedule.</p>
+  </div>
+  <div class="footerbar"><span>CASR · SIGN ROUNDING</span><span class="pgnum"></span></div>
+ </div>
+</section>
+
+<!-- ============ 10 · IDEA 3 GATE ============ -->
+<section class="slide" data-lit="123">
+ <div class="slidecard">
+  <div class="chrome"><span class="logo"><span class="mark"></span>CASR°</span><span class="tag">ICLR | 2027</span></div>
+  <div class="content">
+    <span class="ideatag">IDEA 3 / 4 — GATE</span>
+    <h2>Push the decided, <span class="g">spare the undecided</span></h2>
+    <p>Confidence <code>c = |2h − 1|</code> measures how decided a weight looks: 0 on the fence, ~1 near a wall. The gate scales the pull by it:</p>
+    <div class="formula"><span class="lbl">gate — between 0.15 and 1.0</span>gate = 0.15 + 0.85 · σ( 8 · (c − θ(t)/2) )</div>
+    <div class="panel">
+      <div class="controls"><span class="mono" style="font-size:12px;color:var(--dim)">drag h</span>
+        <input type="range" id="gateSlider" min="15" max="985" value="530" aria-label="Weight position h"></div>
+      <canvas id="cv-gate" width="1720" height="430" role="img" aria-label="Gate curve versus confidence with a marker; an arrow on the ball grows as h moves toward a wall"></canvas>
+      <div class="readrow">
+        <div class="ro"><div class="k">h</div><div class="v" id="gateH">0.53</div></div>
+        <div class="ro"><div class="k">confidence c</div><div class="v" id="gateC">0.06</div></div>
+        <div class="ro"><div class="k">gate</div><div class="v g" id="gateG">0.19</div></div>
+      </div>
+    </div>
+    <p>At <code>h = 0.53</code> the gate is ~0.19 — a whisper, weaker than tuning noise, so the fence-sitter keeps gathering evidence. At <code>h = 0.88</code> it's ~0.93 — clearly decided, pushed firmly home.</p>
+  </div>
+  <div class="footerbar"><span>CASR · SIGN ROUNDING</span><span class="pgnum"></span></div>
+ </div>
+</section>
+
+<!-- ============ 11 · IDEA 4 LATCH ============ -->
+<section class="slide" data-lit="1234">
+ <div class="slidecard">
+  <div class="chrome"><span class="logo"><span class="mark"></span>CASR°</span><span class="tag">ICLR | 2027</span></div>
+  <div class="content">
+    <span class="ideatag">IDEA 4 / 4 — LATCH</span>
+    <h2>Arrive, and a latch <span class="g">clicks shut</span></h2>
+    <p>Tuning never fully stops — one noisy update could bump a weight at 1 back to 0.98 and set it wandering. So when confidence crosses <code>θ(t)</code>, the weight is <strong>pinned to its wall</strong>. A stray opposing nudge? Ignored — the counter decays. A sustained stream of ~30 opposing steps? The latch releases: real accumulated evidence, and rare.</p>
+    <div class="panel">
+      <div class="controls"><button id="latchBtn">▶ Play both cases</button></div>
+      <canvas id="cv-latch" width="1720" height="440" role="img" aria-label="Animation: a latched ball ignores a single opposing nudge; a sustained stream fills a counter to 30 and releases the latch"></canvas>
+    </div>
+    <p class="small">This replaces the straight-through estimator's behavior, where a committed weight can chatter back across 0.5 on any noisy minibatch. Hysteresis makes commitment sticky but not irreversible.</p>
+  </div>
+  <div class="footerbar"><span>CASR · SIGN ROUNDING</span><span class="pgnum"></span></div>
+ </div>
+</section>
+
+<!-- ============ 12 · FULL EQUATION ============ -->
+<section class="slide" data-lit="1234">
+ <div class="slidecard">
+  <div class="chrome"><span class="logo"><span class="mark"></span>CASR°</span><span class="tag">ICLR | 2027</span></div>
+  <div class="content">
+    <div class="eyebrow">03 · All four ideas, one update</div>
+    <h2>Every word is a <span class="g">symbol</span> here</h2>
+    <div class="eqstack">
+      <div class="eqline"><span class="b n">g</span><span class="eq">g_rec = 2s·Σ(error · input)</span><span class="why">TUNING — block output error, backed through ŵ = s(⌊w/s⌋+h)</span></div>
+      <div class="eqline"><span class="b n">c</span><span class="eq">c = |2h − 1|</span><span class="why">how decided this weight looks (0 = fence, 1 = wall)</span></div>
+      <div class="eqline"><span class="b">3</span><span class="eq">gate = 0.15 + 0.85·σ(8·(c − θ(t)/2))</span><span class="why">GATE — whisper for the undecided, firm for the decided</span></div>
+      <div class="eqline"><span class="b">2</span><span class="eq">g = g_rec + λ(t) · gate · (−sign(h − 0.5))</span><span class="why">SCHEDULE — tuning + pull-to-nearest-wall, dialed up by λ(t)</span></div>
+      <div class="eqline"><span class="b n">m</span><span class="eq">m ← 0.9·m + 0.1·g</span><span class="why">memory — running average turns noisy pushes into a persistent lean</span></div>
+      <div class="eqline"><span class="b">1</span><span class="eq">h ← h − η(t) · sign(m)</span><span class="why">WALK — one fixed-size nudge in the direction of the lean</span></div>
+      <div class="eqline"><span class="b">4</span><span class="eq">if c &gt; θ(t): pin h to its wall · ~30 opposing steps in a row: release</span><span class="why">LATCH — commitment is sticky, undone only by sustained evidence</span></div>
+    </div>
+    <p>Two schedules run underneath: <span class="g"><strong>λ(t)</strong></span> ramps <em>up</em> (pull harder) while <code>θ(t)</code> anneals <em>down</em> (accept commitments from more weights). Their crossover is when the layer visibly polarizes.</p>
+  </div>
+  <div class="footerbar"><span>CASR · SIGN ROUNDING</span><span class="pgnum"></span></div>
+ </div>
+</section>
+
+<!-- ============ 13 · NUMBERS ============ -->
+<section class="slide" data-lit="1234">
+ <div class="slidecard">
+  <div class="chrome"><span class="logo"><span class="mark"></span>CASR°</span><span class="tag">ICLR | 2027</span></div>
+  <div class="content">
+    <div class="eyebrow">03 · One weight, one step, real numbers</div>
+    <h2>Step 2000 of 5000 · a weight at <span class="g">h = 0.88</span></h2>
+    <p class="small">Schedules here: θ(t) = 0.905, λ(t) = 0.46, η(t) = 0.003. Momentum carried in: m = −0.25. Sign convention: negative g means "raise h".</p>
+    <ol class="ledger">
+      <li><span class="mono">c = |2·0.88 − 1| = 0.76</span> — well off the fence, leaning to wall 1.</li>
+      <li><span class="mono">gate = 0.15 + 0.85·σ(8·(0.76 − 0.45)) ≈ <span class="g">0.93</span></span> — wide open.</li>
+      <li>Pull: <span class="mono">0.46 · 0.93 · (−1) = <span class="g">−0.43</span></span>. This minibatch's tuning: <span class="mono">g_rec = +0.13</span>. Total <span class="mono">g = −0.30</span>.</li>
+      <li><span class="mono">m = 0.9·(−0.25) + 0.1·(−0.30) = <span class="g">−0.255</span></span> — the lean stays negative.</li>
+      <li><span class="mono">sign(m) = −1</span> → <span class="mono">h ← 0.88 + 0.003 = <span class="g">0.883</span></span>. One nudge closer to wall 1.</li>
+      <li>Latch check: <span class="mono">c = 0.766 &lt; θ = 0.905</span> → not pinned yet. But θ(t) is annealing down while h drifts up — they meet in a few hundred steps, and <em>click</em>.</li>
+    </ol>
+    <p>Note what the sign update bought: the pull never had to <em>out-muscle</em> tuning — only win the sign of the average. A modest λ suffices, and the step stays exactly η no matter how large g gets.</p>
+  </div>
+  <div class="footerbar"><span>CASR · SIGN ROUNDING</span><span class="pgnum"></span></div>
+ </div>
+</section>
+
+<!-- ============ 14 · SIM ============ -->
+<section class="slide" data-lit="1234">
+ <div class="slidecard">
+  <div class="chrome"><span class="logo"><span class="mark"></span>CASR°</span><span class="tag">ICLR | 2027</span></div>
+  <div class="content">
+    <div class="eyebrow">03 · Zoom out</div>
+    <h2><span class="g">2048 weights</span> doing this at once</h2>
+    <p>Every bar is weights at that value of <code>h</code>. Three phases: <strong>drift</strong> (λ ≈ 0), the <strong>crossover</strong> (mass drains from the middle as λ rises past θ), and the <strong>sweep-up</strong> (fence-sitters pushed off and pinned).</p>
+    <div class="panel">
+      <div class="controls"><button id="simBtn">▶ Play</button><button id="simReset" class="secondary">↺ Reset</button></div>
+      <canvas id="cv-sim" width="1720" height="470" role="img" aria-label="Animated histogram of 2048 rounding variables draining from the middle and piling up at zero and one"></canvas>
+      <div class="readrow">
+        <div class="ro"><div class="k">step</div><div class="v" id="simStep">0</div></div>
+        <div class="ro"><div class="k">latched</div><div class="v g" id="simLatch">0%</div></div>
+        <div class="ro"><div class="k">→ 0</div><div class="v" id="simZero">—</div></div>
+        <div class="ro"><div class="k">→ 1</div><div class="v g" id="simOne">—</div></div>
+      </div>
+    </div>
+    <p class="small">Solid bars = latched. Same dynamics as the previous slides, 2048 copies. Constants are representative, not the tuned CASR values.</p>
+  </div>
+  <div class="footerbar"><span>CASR · SIGN ROUNDING</span><span class="pgnum"></span></div>
+ </div>
+</section>
+
+<!-- ============ 15 · RECAP (hero) ============ -->
+<section class="slide hero" data-lit="1234">
+ <div class="slidecard">
+  <div class="chrome"><span class="logo"><span class="mark"></span>CASR°</span><span class="tag">ICLR | 2027</span></div>
+  <div class="content">
+    <div class="eyebrow">Recap</div>
+    <h2 style="color:#fff">Four ideas — and what each <span style="color:#CFF8DF">replaces</span> in TesseraQ</h2>
+    <div class="recap">
+      <div class="row"><span class="n">1</span><div><p style="color:#fff"><strong style="color:#fff">WALK</strong> — <code>h ← h − η·sign(m)</code>. Fixed-size nudges; momentum turns noisy pushes into a steady direction.</p><p class="small" style="color:rgba(242,245,244,.7)">Replaces the Adam inner loop: sign steps make polarization timing schedule-controlled, not curvature-controlled.</p></div></div>
+      <div class="row"><span class="n">2</span><div><p style="color:#fff"><strong style="color:#fff">SCHEDULE</strong> — λ(t) turns the pull-to-nearest-wall up from ~0 to dominant. Tune first, commit later.</p><p class="small" style="color:rgba(242,245,244,.7)">Replaces AdaRound's fixed regularizer with an annealed force routed through the loss.</p></div></div>
+      <div class="row"><span class="n">3</span><div><p style="color:#fff"><strong style="color:#fff">GATE</strong> — pull scaled by confidence. Decided weights pushed home; fence-sitters left to gather evidence.</p><p class="small" style="color:rgba(242,245,244,.7)">Replaces the PAR loop's discrete "freeze the top-p% every K steps" with a smooth per-weight version.</p></div></div>
+      <div class="row"><span class="n">4</span><div><p style="color:#fff"><strong style="color:#fff">LATCH</strong> — cross θ(t) and you're pinned; only ~30 consecutive opposing steps release you.</p><p class="small" style="color:rgba(242,245,244,.7)">Replaces the straight-through estimator's chatter with hysteresis: sticky, not brittle.</p></div></div>
+    </div>
+    <p style="margin-top:16px;color:rgba(242,245,244,.85)">One pass, ~5000 steps — the hard rounding is already done when training ends. <strong style="color:#fff">That's CASR.</strong></p>
+  </div>
+  <div class="footerbar"><span>CASR · SIGN ROUNDING</span><span class="pgnum"></span></div>
+ </div>
+</section>
+
+</div><!-- /deck -->
+
+<nav id="hud" aria-label="Slide navigation">
+  <div class="hudrow">
+    <button class="navbtn secondary" id="prevBtn" aria-label="Previous slide">←</button>
+    <div id="dots" role="tablist"></div>
+    <div id="stack" aria-hidden="true">
+      <span class="chip">1 WALK</span><span class="chip">2 SCHED</span><span class="chip">3 GATE</span><span class="chip">4 LATCH</span>
+    </div>
+    <span id="count">1/15</span>
+    <button class="navbtn" id="nextBtn" aria-label="Next slide">→</button>
+  </div>
+</nav>
+
+<script>
+(function(){
+"use strict";
+const $=id=>document.getElementById(id);
+const C={slide:'#212326',card:'#1A1C1E',line:'#33373B',txt:'#F2F5F4',body:'#A9B0B4',
+  dim:'#7C8388',green:'#45E08A',greenSoft:'#8FF7B4',white:'#F2F5F4',gray:'#9BA3A8'};
+const reduced=window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const sig=x=>1/(1+Math.exp(-x));
+const clamp=(x,a,b)=>Math.min(b,Math.max(a,x));
+const smooth=x=>{x=clamp(x,0,1);return x*x*(3-2*x)};
+function randn(){let u=0,v=0;while(!u)u=Math.random();while(!v)v=Math.random();
+  return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v)}
+if(!CanvasRenderingContext2D.prototype.roundRect){
+  CanvasRenderingContext2D.prototype.roundRect=function(x,y,w,h,r){
+    r=Math.min(r,w/2,h/2);
+    this.moveTo(x+r,y);this.arcTo(x+w,y,x+w,y+h,r);this.arcTo(x+w,y+h,x,y+h,r);
+    this.arcTo(x,y+h,x,y,r);this.arcTo(x,y,x+w,y,r);this.closePath();return this;};
+}
+
+/* schedules — same verified shapes as the explainer */
+const lambdaOf=u=>0.02+0.98*smooth((u-0.30)/0.60);
+const thetaOf =u=>0.50+0.48*(1-smooth((u-0.25)/0.60));
+const lrOf    =u=>0.30+0.70*0.5*(1+Math.cos(Math.PI*clamp(u,0,1)));
+
+/* ---------- shared track ---------- */
+function drawTrack(ctx,W,H,y){
+  ctx.strokeStyle=C.line;ctx.lineWidth=3;
+  ctx.beginPath();ctx.moveTo(90,y);ctx.lineTo(W-90,y);ctx.stroke();
+  ctx.fillStyle=C.white;ctx.fillRect(70,y-58,14,72);
+  ctx.fillStyle=C.green;ctx.fillRect(W-84,y-58,14,72);
+  ctx.font='700 30px Poppins';ctx.textAlign='center';
+  ctx.fillStyle=C.white;ctx.fillText('0',77,y+52);
+  ctx.fillStyle=C.green;ctx.fillText('1',W-77,y+52);
+}
+const trackX=(h,W)=>84+h*(W-168);
+function drawBall(ctx,x,y,r,fill,stroke){
+  ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);
+  if(fill){ctx.fillStyle=fill;ctx.fill();}
+  if(stroke){ctx.strokeStyle=stroke;ctx.lineWidth=4;ctx.stroke();}
+}
+function arrow(ctx,x1,y1,x2,y2,col,w){
+  ctx.strokeStyle=col;ctx.lineWidth=w;ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke();
+  const a=Math.atan2(y2-y1,x2-x1);
+  ctx.fillStyle=col;ctx.beginPath();ctx.moveTo(x2,y2);
+  ctx.lineTo(x2-18*Math.cos(a-0.4),y2-18*Math.sin(a-0.4));
+  ctx.lineTo(x2-18*Math.cos(a+0.4),y2-18*Math.sin(a+0.4));ctx.closePath();ctx.fill();
+}
+
+/* ================= setup track ================= */
+(function(){
+  const ctx=$('cv-track').getContext('2d'),W=1720,H=260,y=150;
+  ctx.clearRect(0,0,W,H);drawTrack(ctx,W,H,y);
+  const x=trackX(0.6,W);
+  drawBall(ctx,x,y-22,20,C.green);
+  ctx.font='600 26px IBM Plex Mono';ctx.fillStyle=C.txt;ctx.textAlign='center';
+  ctx.fillText('h = 0.6',x,y-62);
+  ctx.font='22px IBM Plex Mono';ctx.fillStyle=C.dim;
+  ctx.fillText('a guess — still being tuned',x,H-14);
+})();
+
+/* ================= walk anim ================= */
+(function(){
+  const ctx=$('cv-walk').getContext('2d'),W=1720,H=240,y=150;
+  let h=0.60,trail=[0.60],raf=null,last=0;
+  function draw(){
+    ctx.clearRect(0,0,W,H);drawTrack(ctx,W,H,y);
+    for(const t of trail){ drawBall(ctx,trackX(t,W),y-22,8,'rgba(69,224,138,0.25)'); }
+    const x=trackX(h,W);
+    drawBall(ctx,x,y-22,20,C.green);
+    ctx.font='600 26px IBM Plex Mono';ctx.fillStyle=C.txt;ctx.textAlign='center';
+    ctx.fillText('h = '+h.toFixed(2),x,y-62);
+  }
+  function trailText(){ $('walkTrail').textContent=trail.map(v=>v.toFixed(2)).join(' → ')+(h>=0.985?'  ✓ arrived':''); }
+  function tick(ts){
+    if(ts-last>(reduced?520:380)){
+      last=ts;
+      if(h<0.985){ h=Math.min(1.0,h+0.05); if(h>0.985)h=1.0; trail.push(h); draw(); trailText(); }
+      else { raf=null; return; }
+    }
+    raf=requestAnimationFrame(tick);
+  }
+  $('walkBtn').addEventListener('click',()=>{ if(!raf&&h<0.985){ last=0; raf=requestAnimationFrame(tick);} });
+  $('walkReset').addEventListener('click',()=>{ if(raf){cancelAnimationFrame(raf);raf=null;} h=0.60;trail=[0.60];draw();trailText(); });
+  draw();
+})();
+
+/* ================= forces ================= */
+(function(){
+  const ctx=$('cv-forces').getContext('2d'),W=1720,H=300,y=190;
+  ctx.clearRect(0,0,W,H);drawTrack(ctx,W,H,y);
+  const h=0.66,x=trackX(h,W);
+  drawBall(ctx,x,y-22,20,C.txt);
+  arrow(ctx,x-30,y-70,x-170,y-70,C.gray,7);
+  ctx.font='600 24px IBM Plex Mono';ctx.textAlign='center';ctx.fillStyle=C.gray;
+  ctx.fillText('g_rec — tuning (noisy, jitters)',x-100,y-96);
+  arrow(ctx,x+30,y+34,x+260,y+34,C.green,9);
+  ctx.fillStyle=C.green;
+  ctx.fillText('λ(t)·gate — pull to nearest wall',x+145,y+76);
+  ctx.fillStyle=C.txt;ctx.font='600 26px IBM Plex Mono';
+  ctx.fillText('h = 0.66',x,y-140);
+})();
+
+/* ================= g_rec block diagram ================= */
+(function(){
+  const ctx=$('cv-block').getContext('2d'),W=1720,H=420;
+  ctx.clearRect(0,0,W,H);
+  function box(x,y,w,hh,label,sub,col){
+    ctx.strokeStyle=col;ctx.lineWidth=4;
+    ctx.beginPath();ctx.roundRect(x,y,w,hh,16);ctx.stroke();
+    ctx.font='600 27px IBM Plex Mono';ctx.fillStyle=col;ctx.textAlign='center';
+    ctx.fillText(label,x+w/2,y+hh/2-(sub?8:-9));
+    if(sub){ctx.font='20px IBM Plex Mono';ctx.fillStyle=C.dim;ctx.fillText(sub,x+w/2,y+hh/2+28);}
+  }
+  const midY=210;
+  /* input X */
+  box(60,midY-55,220,110,'X','calibration input',C.gray);
+  /* branch lines */
+  ctx.strokeStyle=C.line;ctx.lineWidth=4;
+  ctx.beginPath();ctx.moveTo(280,midY);ctx.lineTo(360,midY);
+  ctx.moveTo(360,midY);ctx.lineTo(360,90);ctx.moveTo(360,midY);ctx.lineTo(360,330);ctx.stroke();
+  arrow(ctx,360,90,470,90,C.gray,4);
+  arrow(ctx,360,330,470,330,C.green,4);
+  /* two paths */
+  box(470,40,330,100,'W  (original)','full precision',C.gray);
+  box(470,280,330,100,'Ŵ(h) = s(⌊w/s⌋+h)','quantized — h lives here',C.green);
+  arrow(ctx,800,90,930,90,C.gray,4);
+  arrow(ctx,800,330,930,330,C.green,4);
+  box(930,40,190,100,'y','',C.gray);
+  box(930,280,190,100,'ŷ','',C.green);
+  /* compare */
+  ctx.strokeStyle=C.line;ctx.beginPath();
+  ctx.moveTo(1120,90);ctx.lineTo(1200,90);ctx.lineTo(1200,185);
+  ctx.moveTo(1120,330);ctx.lineTo(1200,330);ctx.lineTo(1200,235);ctx.stroke();
+  arrow(ctx,1200,185,1200,196,C.line,4);arrow(ctx,1200,235,1200,224,C.line,4);
+  box(1200-110,160,220,100,'e = ŷ − y','compare',C.txt);
+  /* gradient back */
+  arrow(ctx,1090,260,700,395,C.green,5);
+  ctx.font='600 24px IBM Plex Mono';ctx.fillStyle=C.green;ctx.textAlign='center';
+  ctx.fillText('g_rec = ∂L/∂h flows back to h',930,412);
+})();
+
+/* ================= momentum ================= */
+(function(){
+  const ctx=$('cv-mom').getContext('2d'),W=1720,H=430;
+  const padL=90,padR=40,padT=40,padB=70,STEPS=44;
+  let gs=[],ms=[],raf=null,i=0,m=0.10,last=0;
+  const X=k=>padL+k/(STEPS-1)*(W-padL-padR);
+  const Y=v=>H-padB-((v+0.6)/1.2)*(H-padT-padB);
+  function frame(){
+    ctx.clearRect(0,0,W,H);
+    ctx.strokeStyle=C.line;ctx.strokeRect(padL,padT,W-padL-padR,H-padT-padB);
+    ctx.setLineDash([6,6]);ctx.strokeStyle=C.dim;
+    ctx.beginPath();ctx.moveTo(padL,Y(0));ctx.lineTo(W-padR,Y(0));ctx.stroke();ctx.setLineDash([]);
+    ctx.font='22px IBM Plex Mono';ctx.fillStyle=C.dim;ctx.textAlign='right';
+    ctx.fillText('0',padL-10,Y(0)+8);
+    ctx.textAlign='center';ctx.fillText('sign flips ↑↓ here would jerk the walk — m never crosses',(padL+W-padR)/2,H-16);
+    for(let k=0;k<gs.length;k++) drawBall(ctx,X(k),Y(gs[k]),7,'rgba(169,176,180,0.5)');
+    ctx.strokeStyle=C.green;ctx.lineWidth=6;ctx.beginPath();
+    for(let k=0;k<ms.length;k++){k?ctx.lineTo(X(k),Y(ms[k])):ctx.moveTo(X(k),Y(ms[k]));}
+    ctx.stroke();
+    ctx.font='600 24px IBM Plex Mono';ctx.textAlign='left';
+    ctx.fillStyle=C.gray;ctx.fillText('· g (noisy pushes)',padL+14,padT+34);
+    ctx.fillStyle=C.green;ctx.fillText('— m (running average)',padL+14,padT+68);
+    if(ms.length){
+      const s=Math.sign(ms[ms.length-1]);
+      ctx.fillStyle=C.txt;ctx.textAlign='right';
+      ctx.fillText('sign(m) = '+(s>0?'+1  (keep walking right)':'−1'),W-padR-14,padT+34);
+    }
+  }
+  function tick(ts){
+    if(ts-last>(reduced?140:70)){
+      last=ts;
+      if(i<STEPS){
+        const g=0.14+randn()*0.22;
+        m=0.9*m+0.1*g; gs.push(g); ms.push(m); i++; frame();
+      } else { raf=null; return; }
+    }
+    raf=requestAnimationFrame(tick);
+  }
+  $('momBtn').addEventListener('click',()=>{
+    if(raf)cancelAnimationFrame(raf);
+    gs=[];ms=[];i=0;m=0.10;last=0;raf=requestAnimationFrame(tick);
+  });
+  frame();
+})();
+
+/* ================= hill morph ================= */
+(function(){
+  const ctx=$('cv-hill').getContext('2d'),W=1720,H=430;
+  const padL=70,padR=70,padT=36,padB=60;
+  const target=0.62,curvK=2.2;
+  let ball=target;
+  const V=(h,lam)=>curvK*(h-target)*(h-target)+2.6*lam*Math.min(h,1-h);
+  function draw(u){
+    const lam=lambdaOf(u);
+    for(let k=0;k<24;k++){
+      const dV=2*curvK*(ball-target)+2.6*lam*(ball<0.5?1:-1);
+      ball=clamp(ball-0.004*Math.sign(dV)-0.0009*dV,0.02,0.98);
+    }
+    ctx.clearRect(0,0,W,H);
+    let vmax=0;const pts=[];
+    for(let p=0;p<=240;p++){const h=p/240;const v=V(h,lam);pts.push(v);if(v>vmax)vmax=v;}
+    vmax=Math.max(vmax,0.7);
+    const X=h=>padL+h*(W-padL-padR);
+    const Y=v=>H-padB-(v/vmax)*(H-padT-padB-40);
+    ctx.strokeStyle=C.txt;ctx.lineWidth=5;ctx.beginPath();
+    for(let p=0;p<=240;p++){const x=X(p/240),y=Y(pts[p]);p?ctx.lineTo(x,y):ctx.moveTo(x,y);}
+    ctx.stroke();
+    ctx.fillStyle=C.white;ctx.fillRect(X(0)-12,Y(pts[0])-46,10,60);
+    ctx.fillStyle=C.green;ctx.fillRect(X(1)+2,Y(pts[240])-46,10,60);
+    ctx.font='700 28px Poppins';ctx.textAlign='center';
+    ctx.fillStyle=C.white;ctx.fillText('0',X(0)-7,H-18);
+    ctx.fillStyle=C.green;ctx.fillText('1',X(1)+7,H-18);
+    const by=Y(V(ball,lam));
+    drawBall(ctx,X(ball),by-16,16,C.green);
+    ctx.font='600 23px IBM Plex Mono';ctx.fillStyle=C.dim;ctx.textAlign='center';
+    if(lam<0.25) ctx.fillText('low λ: floor is just the tuning dip — ball rests at its best value',W/2,padT+4);
+    else if(lam<0.75) ctx.fillText('λ rising: the middle lifts — ball starts sliding to its nearest wall',W/2,padT+4);
+    else ctx.fillText('high λ: hill dominates — every ball ends against a wall',W/2,padT+4);
+    $('hillStep').textContent=Math.round(u*5000);
+    $('hillLam').textContent=lam.toFixed(2);
+    $('hillH').textContent=ball.toFixed(2);
+  }
+  $('hillSlider').addEventListener('input',e=>draw(e.target.value/1000));
+  draw(0);
+})();
+
+/* ================= gate ================= */
+(function(){
+  const ctx=$('cv-gate').getContext('2d'),W=1720,H=430;
+  const th=0.90;
+  const gateOf=c=>0.15+0.85*sig(8*(c-th/2));
+  const padL=90,padR=40,padT=40,padB=170;
+  function draw(h){
+    const c=Math.abs(2*h-1),g=gateOf(c);
+    ctx.clearRect(0,0,W,H);
+    const X=cc=>padL+cc*(W-padL-padR), Y=v=>padT+(1-v)*(H-padT-padB);
+    ctx.strokeStyle=C.line;ctx.strokeRect(padL,padT,W-padL-padR,H-padT-padB);
+    ctx.strokeStyle=C.green;ctx.lineWidth=6;ctx.beginPath();
+    for(let p=0;p<=200;p++){const cc=p/200;p?ctx.lineTo(X(cc),Y(gateOf(cc))):ctx.moveTo(X(cc),Y(gateOf(cc)));}
+    ctx.stroke();
+    drawBall(ctx,X(c),Y(g),13,C.txt);
+    ctx.font='600 23px IBM Plex Mono';ctx.fillStyle=C.dim;
+    ctx.textAlign='left';ctx.fillText('gate',padL+12,padT+30);
+    ctx.textAlign='center';ctx.fillText('confidence c →',(padL+W-padR)/2,H-padB+40);
+    const ty=H-58;drawTrack(ctx,W,H,ty);
+    const x=trackX(h,W);
+    drawBall(ctx,x,ty-20,16,C.txt);
+    const dirRight=h>=0.5, len=30+250*g;
+    ctx.strokeStyle=C.green;ctx.lineWidth=9;ctx.beginPath();
+    ctx.moveTo(x+(dirRight?26:-26),ty-20);ctx.lineTo(x+(dirRight?26+len:-26-len),ty-20);ctx.stroke();
+    const ax=x+(dirRight?26+len:-26-len);
+    ctx.fillStyle=C.green;ctx.beginPath();
+    ctx.moveTo(ax+(dirRight?16:-16),ty-20);ctx.lineTo(ax,ty-32);ctx.lineTo(ax,ty-8);ctx.closePath();ctx.fill();
+    $('gateH').textContent=h.toFixed(2);
+    $('gateC').textContent=c.toFixed(2);
+    $('gateG').textContent=g.toFixed(2);
+  }
+  $('gateSlider').addEventListener('input',e=>draw(e.target.value/1000));
+  draw(0.53);
+})();
+
+/* ================= latch anim ================= */
+(function(){
+  const ctx=$('cv-latch').getContext('2d'),W=1720,H=440,y=200;
+  let raf=null,t=0,phase=0,counter=0,h=1.0,label='latched at wall 1';
+  function draw(){
+    ctx.clearRect(0,0,W,H);drawTrack(ctx,W,H,y);
+    const x=trackX(h,W);
+    const pinned=(phase<3);
+    drawBall(ctx,x,y-22,20,pinned?C.green:C.white);
+    if(pinned){
+      ctx.strokeStyle=C.green;ctx.lineWidth=7;
+      ctx.beginPath();ctx.moveTo(x+34,y-60);ctx.lineTo(x+52,y-60);ctx.lineTo(x+52,y+16);ctx.lineTo(x+34,y+16);ctx.stroke();
+    }
+    if(phase===1||phase===2){
+      const ax=x-160+((t*13)%40);
+      arrow(ctx,ax,y-22,ax+96,y-22,C.gray,8);
+    }
+    const bx=120,bw=W-240,by=H-110;
+    ctx.strokeStyle=C.line;ctx.lineWidth=3;ctx.strokeRect(bx,by,bw,30);
+    ctx.fillStyle=counter>=30?C.white:C.green;
+    ctx.fillRect(bx,by,bw*Math.min(1,counter/30),30);
+    ctx.font='600 23px IBM Plex Mono';ctx.fillStyle=C.body;ctx.textAlign='left';
+    ctx.fillText('opposition counter: '+Math.round(counter)+' / 30',bx,by-12);
+    ctx.font='600 26px IBM Plex Mono';ctx.textAlign='center';ctx.fillStyle=C.txt;
+    ctx.fillText(label,W/2,52);
+  }
+  function tick(){
+    t++;
+    if(phase===0){ label='latched at wall 1 — pinned'; if(t>40){phase=1;t=0;} }
+    else if(phase===1){
+      label='one stray opposing nudge → counter blips, then decays. still pinned.';
+      if(t<10)counter=Math.min(30,counter+1); else counter=Math.max(0,counter-2);
+      if(t>46){phase=2;t=0;counter=0;}
+    }
+    else if(phase===2){
+      label='sustained opposing stream → counter climbs…';
+      counter=Math.min(30,counter+0.55);
+      if(counter>=30){phase=3;t=0;label='30 in a row → latch releases, weight crosses over';}
+    }
+    else if(phase===3){
+      h=Math.max(0.0,h-0.02);
+      if(h<=0.0){ label='re-latched at wall 0 — a rare, evidence-driven late flip'; draw(); raf=null; return; }
+    }
+    draw();
+    raf=requestAnimationFrame(tick);
+  }
+  $('latchBtn').addEventListener('click',()=>{
+    if(raf)cancelAnimationFrame(raf);
+    t=0;phase=0;counter=0;h=1.0;raf=requestAnimationFrame(tick);
+  });
+  draw();
+})();
+
+/* ================= full sim ================= */
+(function(){
+  const ctx=$('cv-sim').getContext('2d'),W=1720,H=470;
+  const N=2048,FRAMES=900,TOTAL=5000,BINS=52;
+  let h,m,target,curv,latched,pole,oppose,frame,raf=null;
+  function init(){
+    h=new Float32Array(N);m=new Float32Array(N);target=new Float32Array(N);
+    curv=new Float32Array(N);latched=new Uint8Array(N);pole=new Uint8Array(N);oppose=new Float32Array(N);
+    for(let i=0;i<N;i++){
+      h[i]=sig(randn()*1.15);
+      const r=Math.random();
+      if(r<0.12)target[i]=0.5+randn()*0.05;
+      else{let side=h[i]>0.5?1:0;if(Math.random()<0.14)side=1-side;
+        target[i]=side?0.80+Math.random()*0.12:0.08+Math.random()*0.12;}
+      target[i]=clamp(target[i],0.02,0.98);
+      curv[i]=0.4+Math.random()*1.6;
+    }
+    frame=0;readouts();draw();
+  }
+  function step(){
+    if(frame>=FRAMES){stop();return;}
+    const u=frame/FRAMES,lam=5.0*lambdaOf(u),th=thetaOf(u),lr=0.004*lrOf(u);
+    for(let i=0;i<N;i++){
+      const conf=Math.abs(2*h[i]-1);
+      let g=curv[i]*(h[i]-target[i])+randn()*0.35;
+      const gate=0.15+0.85*sig((conf-0.5*th)*8);
+      g+=lam*gate*(h[i]>=0.5?-1:1);
+      m[i]=0.90*m[i]+0.10*g;
+      const dir=Math.sign(0.85*m[i]+0.15*g)||0;
+      if(latched[i]){
+        const opposing=(pole[i]===1&&dir>0)||(pole[i]===0&&dir<0);
+        oppose[i]=opposing?oppose[i]+1:Math.max(0,oppose[i]-2);
+        if(oppose[i]>30&&u<0.72){latched[i]=0;oppose[i]=0;h[i]=pole[i]?0.64:0.36;m[i]=0;}
+        else h[i]+=(pole[i]-h[i])*0.25;
+      }else{
+        h[i]=clamp(h[i]-lr*dir,0.015,0.985);
+        if(Math.abs(2*h[i]-1)>th){latched[i]=1;pole[i]=h[i]>=0.5?1:0;oppose[i]=0;}
+      }
+    }
+    frame++;
+  }
+  function draw(){
+    const padL=60,padR=30,padT=44,padB=56;
+    ctx.clearRect(0,0,W,H);
+    const bins=new Array(BINS).fill(0),binsL=new Array(BINS).fill(0);
+    for(let i=0;i<N;i++){const b=Math.min(BINS-1,Math.floor(h[i]*BINS));bins[b]++;if(latched[i])binsL[b]++;}
+    const maxB=Math.max(...bins,N*0.06),bw=(W-padL-padR)/BINS;
+    ctx.strokeStyle=C.line;ctx.strokeRect(padL,padT,W-padL-padR,H-padT-padB);
+    const fx=padL+(W-padL-padR)/2;
+    ctx.setLineDash([6,6]);ctx.strokeStyle=C.dim;
+    ctx.beginPath();ctx.moveTo(fx,padT);ctx.lineTo(fx,H-padB);ctx.stroke();ctx.setLineDash([]);
+    ctx.font='600 22px IBM Plex Mono';ctx.fillStyle=C.dim;ctx.textAlign='center';
+    ctx.fillText('h = 0.5',fx,padT-10);
+    for(let b=0;b<BINS;b++){
+      const x=padL+b*bw,hb=(H-padT-padB)*bins[b]/maxB,hl=(H-padT-padB)*binsL[b]/maxB;
+      const side=(b+0.5)/BINS<0.5;
+      ctx.fillStyle=side?'rgba(242,245,244,0.28)':'rgba(69,224,138,0.28)';
+      ctx.fillRect(x+1,H-padB-hb,bw-2,hb);
+      ctx.fillStyle=side?C.white:C.green;
+      ctx.fillRect(x+1,H-padB-hl,bw-2,hl);
+    }
+    ctx.font='700 26px Poppins';
+    ctx.fillStyle=C.white;ctx.textAlign='left';ctx.fillText('→ 0',padL+8,H-padB+36);
+    ctx.fillStyle=C.green;ctx.textAlign='right';ctx.fillText('→ 1',W-padR-8,H-padB+36);
+  }
+  function readouts(){
+    let nl=0,z=0,o=0;
+    for(let i=0;i<N;i++){nl+=latched[i];(h[i]<0.5?z++:o++);}
+    $('simStep').textContent=Math.round(frame/FRAMES*TOTAL);
+    $('simLatch').textContent=(100*nl/N).toFixed(1)+'%';
+    $('simZero').textContent=(100*z/N).toFixed(1)+'%';
+    $('simOne').textContent=(100*o/N).toFixed(1)+'%';
+  }
+  function loop(){ step();step(); draw();readouts(); raf=frame<FRAMES?requestAnimationFrame(loop):null;
+    if(!raf)$('simBtn').textContent='▶ Play'; }
+  function stop(){ if(raf)cancelAnimationFrame(raf); raf=null; $('simBtn').textContent='▶ Play'; }
+  $('simBtn').addEventListener('click',()=>{
+    if(raf){stop();return;}
+    if(frame>=FRAMES)init();
+    $('simBtn').textContent='❚❚ Pause';raf=requestAnimationFrame(loop);
+  });
+  $('simReset').addEventListener('click',()=>{stop();init();});
+  init();
+})();
+
+/* ================= agenda rows ================= */
+const AG=[
+  ['First section','The setup — one number, two walls',2],
+  ['Second section','Idea 1 · The walk',3],
+  ['Third section','The push — g_rec & momentum',4],
+  ['Fourth section','Ideas 2–4 · Schedule, gate, latch',8],
+  ['Fifth section','Full equation, numbers & 2048 weights',11],
+];
+AG.forEach((a,k)=>{
+  const b=document.createElement('button');b.className='agrow';
+  b.innerHTML='<span><span class="sec">'+a[0]+'</span><span class="nm">'+a[1]+'</span></span><span class="num">0'+(k+1)+'</span>';
+  b.addEventListener('click',()=>go(a[2]));
+  $('agRows').appendChild(b);
+});
+
+/* ================= deck navigation ================= */
+const slides=[...document.querySelectorAll('.slide')];
+const dots=$('dots'),chips=[...document.querySelectorAll('#stack .chip')];
+let cur=0;
+slides.forEach((s,i)=>{
+  const d=document.createElement('button');d.className='dot';d.setAttribute('aria-label','Slide '+(i+1));
+  d.addEventListener('click',()=>go(i));dots.appendChild(d);
+  const pn=s.querySelector('.pgnum'); if(pn)pn.textContent=String(i+1).padStart(2,'0');
+});
+const dotEls=[...dots.children];
+function go(i){
+  cur=clamp(i,0,slides.length-1);
+  slides.forEach((s,k)=>s.classList.toggle('active',k===cur));
+  dotEls.forEach((d,k)=>d.classList.toggle('on',k===cur));
+  const lit=slides[cur].dataset.lit||'';
+  chips.forEach((c,k)=>c.classList.toggle('lit',lit.includes(String(k+1))));
+  $('count').textContent=(cur+1)+'/'+slides.length;
+  slides[cur].scrollTop=0;
+}
+$('prevBtn').addEventListener('click',()=>go(cur-1));
+$('nextBtn').addEventListener('click',()=>go(cur+1));
+document.addEventListener('keydown',e=>{
+  if(e.key==='ArrowRight'||e.key==='PageDown'||e.key===' '){e.preventDefault();go(cur+1);}
+  if(e.key==='ArrowLeft'||e.key==='PageUp'){e.preventDefault();go(cur-1);}
+});
+let tx=null,ty=null;
+document.addEventListener('touchstart',e=>{tx=e.touches[0].clientX;ty=e.touches[0].clientY;},{passive:true});
+document.addEventListener('touchend',e=>{
+  if(tx===null)return;
+  const dx=e.changedTouches[0].clientX-tx, dy=e.changedTouches[0].clientY-ty;
+  if(Math.abs(dx)>60&&Math.abs(dx)>1.6*Math.abs(dy)) go(cur+(dx<0?1:-1));
+  tx=ty=null;
+},{passive:true});
+go(0);
+})();
+</script>
+</body>
+</html>
