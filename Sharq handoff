@@ -1,0 +1,590 @@
+# SHARQ — Complete Project Handoff
+
+**SHARQ = SHift-Add Routed Quantization**
+
+This document is a full transfer of everything accumulated on the SHARQ project. It is written to be read cold, with no prior context. If you are a new assistant picking this up: read Sections 1–4 carefully. Those contain the actual idea. Everything after that is supporting detail, plans, and history.
+
+---
+
+## Part 0 — The one-paragraph version
+
+SHARQ is a way to quantize the weights of a large language model so that the hardware never has to multiply. Every weight level is forced to be a sum of at most two powers of two. That restriction means a weight times an activation can be computed with two small exponent additions and one floating-point add, instead of a full multiplier. The set of legal levels is small enough (11 values) that the software can search *every* possible codebook exhaustively and pick the best one for each layer. Which levels a given model uses is stored as a few dozen bits in a register — not baked into the gates — so one fixed silicon design serves every model, every layer, and every bit-width (4, 3, or 2 bits). The paper contribution is the processing element (PE) itself, aimed at a computer architecture venue.
+
+---
+
+## Part 1 — The core idea
+
+### 1.1 The problem being solved
+
+In an LLM inference accelerator with 4-bit weights and FP16 activations (W4A16), people usually assume the 4-bit weight is the cheap part. It is. The expensive part is the FP16 multiply-accumulate hardware sitting behind it. If you want a smaller, cooler chip, the multiplier is the thing to attack.
+
+There is an existing trick for this. If a weight value is a power of two, then multiplying an FP16 activation by it is just adding a constant to the activation's exponent field. No multiplier needed. The mantissa bits pass straight through on wires. **This is the single most important mechanism in the project, and it is not ours** — it is MixPE's Equation 7 (arXiv:2411.16158). SHARQ builds on it and must cite it as prior work.
+
+MixPE applies this to standard uniform INT4 weights. A uniform 4-bit weight can be any value from 0 to 15. Written in binary, some of those values have up to four 1-bits (15 = 8+4+2+1). So MixPE has to build hardware that can handle the worst case: **four** exponent-scale units feeding a **three-adder tree, two levels deep**. It cannot shrink that, because it has to support every uniform level.
+
+### 1.2 The SHARQ move
+
+Do not accept the uniform level set. Choose the level set to match what cheap hardware can do.
+
+**Every SHARQ weight magnitude is `a + b` where `a, b ∈ {0, 1, 2, 4, 8}` and the two terms are distinct.**
+
+Equivalently, and this is the cleanest way to state it in a paper: **SHARQ's codebook is the popcount-≤2 subset of UINT4.** Take the 16 uniform 4-bit values and keep only the ones with at most two 1-bits set.
+
+That gives exactly **11 legal magnitudes**:
+
+```
+{0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 12}
+```
+
+Broken down:
+
+| Level | Term A | Term B | en2 | selA | selB | Tier |
+|------:|-------:|-------:|----:|-----:|-----:|------|
+| 0 | — | — | 0 | — | — | zero |
+| 1 | 1 | — | 0 | 00 | — | Tier-1 |
+| 2 | 2 | — | 0 | 01 | — | Tier-1 |
+| 3 | 1 | 2 | 1 | 00 | 01 | Tier-2 |
+| 4 | 4 | — | 0 | 10 | — | Tier-1 |
+| 5 | 1 | 4 | 1 | 00 | 10 | Tier-2 |
+| 6 | 2 | 4 | 1 | 01 | 10 | Tier-2 |
+| 8 | 8 | — | 0 | 11 | — | Tier-1 |
+| 9 | 1 | 8 | 1 | 00 | 11 | Tier-2 |
+| 10 | 2 | 8 | 1 | 01 | 11 | Tier-2 |
+| 12 | 4 | 8 | 1 | 10 | 11 | Tier-2 |
+
+**The illegal values in 0–15 are 7, 11, 13, 14, and 15.** Each would need three or more terms. The software search never picks them, so the hardware never has to represent them.
+
+- **Tier-1** levels use one term. The second datapath is clock-gated off and the adder is bypassed.
+- **Tier-2** levels use both terms. This is where the one FP16 add happens.
+
+Because every magnitude is an exact small integer in `[0, 12]` and the sign is a separate bit, the full signed range is `[−12, +12]`, all exact integers.
+
+### 1.3 Why this wins
+
+MixPE must provision 4 exponent-scale units and a depth-2, 3-adder tree.
+SHARQ provably needs **2 exponent-scale units and a depth-1, 1-adder tree.**
+
+At A16 that adder is a *full FP16 adder*: exponent compare, mantissa alignment shift, 12-bit add, leading-zero detect, round, renormalize. It is the dominant cell. The exponent adder next to it is a 5-bit integer add — roughly 30–50 gates. So cutting three FP16 adders down to one, and gating that one off for every Tier-1 weight, is where the area and dynamic-power win lives.
+
+Two structural facts to lean on, both exact by construction and not dependent on any synthesis run:
+
+1. **Adder count: 1 vs 3.**
+2. **Tree depth: 1 vs 2.** Half the combinational depth means frequency headroom.
+
+A third, softer point: dynamic power scales with the fraction of Tier-2 weights in the model, because Tier-1 weights bypass the adder entirely. That fraction is a measurable property of a quantized model and is worth reporting.
+
+### 1.4 The one-sentence pitch
+
+> MixPE removed the multiplier. SHARQ also removes most of the adder tree — by making the codebook, not the datapath, absorb the complexity.
+
+### 1.5 The second half of the idea: routing, not lookup
+
+The 11 legal magnitudes are more than any single model needs at once, especially at 3 or 2 bits. So the map from code to level is **programmable**, while the datapath that realizes any legal level is **fixed**.
+
+The critical distinction, and the reason the "R" in SHARQ is *Routed*:
+
+> **The table stores routing decisions — which shift terms fire — not coefficient values.**
+
+It is not a value LUT. The hardware never stores an FP16 number and never looks one up. It stores a handful of mux-select and enable bits. This matters enormously for the paper, because a value LUT would make every 4-bit non-uniform codebook cost exactly the same, which would erase SHARQ's entire hardware argument. See Section 7.3.
+
+---
+
+## Part 2 — The hardware
+
+### 2.1 Terminology warning (learned the hard way)
+
+**Do not say "shifter" to chip designers.** The LSI chip design team reviewed the materials and raised a concern that shifters would hurt area. That concern is correct *for a barrel shifter over integer data*, which is what they assumed. SHARQ does not have one. SHARQ's "shift" is a **5-bit addition into the FP16 exponent field**, with the mantissa bits passing through unchanged on wires.
+
+**Rename "shifter" → "exponent adder" in every document shown to a hardware audience.** This has already been agreed as the fix, and it needs to be applied consistently across the explainer, the slides, and the paper.
+
+### 2.2 The decode contract
+
+Every weight code decodes to a small set of control fields. This is the entire interface between the quantizer and the silicon.
+
+| Field | Width | Meaning |
+|-------|-------|---------|
+| `sign` | 1 b | XORs the sign bit of the result. Taken directly from the code MSB, not from the table. |
+| `s1[1:0]` | 2 b | Shift amount for term 1. Encodes term value 1, 2, 4, 8 as shift 0, 1, 2, 3. |
+| `s2[1:0]` | 2 b | Shift amount for term 2. Only meaningful when `en2 = 1`. |
+| `en2` | 1 b | 1 = Tier-2, both paths live, adder active. 0 = Tier-1, second path clock-gated, adder bypassed. |
+| `zero` | — | Either a hardwired slot or an `en1 = 0` encoding. See Section 3.5. |
+
+### 2.3 PE datapath
+
+Per weight, per cycle:
+
+```
+activation x (FP16)
+      ├──► EXP + s1  ──────────────┐
+      └──► EXP + s2  (gate: en2) ──┤
+                                   ▼
+                            FP16 ADD  (bypass if !en2)
+                                   ▼
+                             sign XOR
+                                   ▼
+                          ACC +=  (gate: !zero)
+```
+
+- 2 exponent adders, 1 FP16 adder, tree depth 1.
+- Sign is applied by conditional negation (XOR plus carry-in in two's complement).
+- The accumulator grows by about `log2(z_max) ≈ 3.5` bits over the activation width.
+- **The per-group scale `α` is hoisted out of the inner loop entirely.** It is applied once per group of `g` weights after accumulation — one FP16 multiply per `g` elements, not one per element. This ordering is adopted from MixPE (dequantize after the GEMM, not inside it) and it is orthogonal to the codebook idea. Do not skip it; without it the design looks needlessly worse.
+- The scale unit is one FP16/FP32 multiplier per drain lane. It is off the critical loop. Do not over-optimize it.
+
+### 2.4 Where the enable table physically lives
+
+This depends on the dataflow, and it is a real design decision, not a detail:
+
+- **Weight-stationary (recommended): pre-decode at load time.** The table sits once at the weight-loading interface. Each PE's weight register then holds the ~7-bit routing configuration directly instead of the 3–4-bit code. Cost: a few extra flip-flops per PE weight register. The table is never replicated.
+- **Streaming weights: replicate per PE.** Roughly 50 flip-flops plus an 8:1 select mux per PE. Still small next to the exponent adders and the FP16 adder, but it is real.
+
+### 2.5 Config domain
+
+For v1: **one enable table per array, broadcast.** Per-layer table swaps are a register write between layers. Per-channel tables are a v2 discussion with genuine area cost.
+
+Reconfiguration hides completely behind weight loading, because the table only changes at layer boundaries where thousands of cycles are already being spent streaming the next weight tile. A double-buffered table (two copies plus a select bit) removes even the nominal stall.
+
+Config write path: APB or scan, once per model load (or per layer).
+
+### 2.6 Array integration
+
+Output-stationary systolic array. Activations broadcast along rows, weight codes stream, partial sums stay resident in the PE psum register. Group scale applied at the drain. FTZ (flush-to-zero) handling for subnormals is an open decision — see Section 8.
+
+### 2.7 Model-side storage cost
+
+Per-layer codebooks cost roughly **50 bits per layer plus a 2-bit mode field**. For an entire LLM that is a few kilobytes. This is negligible and is a strong talking point: every layer of every model gets its own codebook *and* its own bit-width, configured by metadata, on one fixed PE array. No fixed-format competitor can match that at comparable PE cost.
+
+---
+
+## Part 3 — Different bin sets at W3 and W2, and how the decoder supports every combination
+
+This is the part that was specifically flagged as needing full coverage. It is also the part most likely to be misunderstood, so it is spelled out in detail.
+
+### 3.1 The format: sign-magnitude with a magnitude table
+
+A `b`-bit SHARQ code is split as:
+
+```
+[ 1 sign bit ][ (b−1) magnitude bits ]
+```
+
+- **W4** = 1 sign + 3 magnitude bits → **8 magnitude slots**
+- **W3** = 1 sign + 2 magnitude bits → **4 magnitude slots**
+- **W2** = 1 sign + 1 magnitude bit → **2 magnitude slots**
+
+The magnitude table has **8 physical slots in silicon, always**. W3 uses slots 0–3. W2 uses slots 0–1. Unused slots are don't-care and can be clock-gated. A 2-bit mode field carried as layer metadata tells the weight unpacker how many bits to consume per weight. **The datapath does not change at all between bit-widths.** This cross-bit-width reuse of one decoder was identified early as one of the genuinely novel pieces of the design.
+
+### 3.2 How many bin sets exist at each bit-width
+
+A codebook is a choice of `2^(b−1)` magnitudes out of the 11 legal ones. That is a tiny space, which is why the search can be exhaustive rather than heuristic.
+
+Because the per-group scale `α` absorbs any constant factor, two codebooks that are scalar multiples of each other are *the same codebook*. Canonicalizing by dividing each set by its smallest nonzero element and comparing sorted ratio vectors gives the true distinct counts. These have now been computed exactly:
+
+| Bit-width | Magnitudes chosen | Nominal sets | With zero | Without zero | **Distinct after scale-dedup** |
+|-----------|-------------------|-------------:|----------:|-------------:|-------------------------------:|
+| W4 | 8 of 11 | 165 | 120 | 45 | **165** (no collapse) |
+| W3 | 4 of 11 | 330 | 120 | 210 | **290** (96 with zero, 194 without) |
+| W2 | 2 of 11 | 55 | 10 | 45 | **25** (1 with zero, 24 without) |
+
+Three notes on this table:
+
+1. **W4 does not deduplicate at all.** Picking 8 of 11 values leaves so little slack that scaling one subset almost never lands on another subset. All 165 are genuinely distinct.
+2. **W3 = 290 distinct.** An earlier session estimated 250–280 by hand; the exact count is 290. Use 290.
+3. **W2 collapses hard: 55 → 25.** All ten `{0, x}` sets are the *same* codebook (and a fairly useless one — two levels where one is zero). The remaining 24 are the distinct ratio classes among nonzero pairs.
+
+The sentence for the paper is: *"We exhaustively evaluate all N distinct hardware-expressible codebooks"* with N = 165 / 290 / 25.
+
+### 3.3 What the W2 design space actually is
+
+At W2 there are only two magnitudes, so **only their ratio matters**. The design space is literally one number: how far apart the two levels are. The 24 available nonzero ratios are:
+
+```
+10/9, 9/8, 6/5, 5/4, 4/3, 3/2, 8/5, 5/3, 9/5, 2, 9/4, 12/5,
+5/2, 8/3, 3, 10/3, 4, 9/2, 5, 6, 8, 9, 10, 12
+```
+
+They run from 10/9 (nearly degenerate, both levels almost equal) all the way to 12. The originally hand-picked `{0.25, 1.0}` from the first design document is the **ratio-4 class**. Ratio 2 (`{1,2}`, `{2,4}`, `{3,6}`, `{4,8}`, `{5,10}`, `{6,12}` — six encodings, one codebook) is the uniform-ish class.
+
+Framing this as "the W2 search is a one-dimensional sweep over 24 ratios plus one degenerate zero-containing option" is clean and honest, and it is a nice contrast to methods that need gradient-based codebook learning at 2 bits.
+
+### 3.4 W3 examples and the zero question
+
+At W3 the same scale-collapsing happens but less often. Examples of sets that are actually the same codebook:
+
+- `{0,1,2,4}` ≡ `{0,2,4,8}` ≡ `{0,3,6,12}`
+- `{0,1,3,5}` ≡ `{0,2,6,10}`
+
+**The zero-inclusion finding is important and was learned from a real failure.** The first W3 smoke test on OPT-125M gave 80.8 perplexity — a blowup. Two causes:
+
+1. The search was free to pick codebooks with **no zero level**, and it did. Weight distributions in LLMs are sharply peaked at zero; a codebook with no zero is catastrophic.
+2. The clip grid was too narrow.
+
+Fixes: **force zero into the codebook** at W3/W2, and widen the clip grid to `[0.50, 1.00]`. That took W3 from 80.8 to 48.9 PPL. This is written up as ablation **A5**.
+
+The design philosophy note here: the original design document had six hand-designed bin sets (Options A through F) and a long internal debate about zero-versus-no-zero. The exhaustive search covers all of them and settles the debate empirically, per layer. That is a much stronger story than defending hand-picked grids.
+
+### 3.5 The register encoding — two options
+
+There are two encodings on record. Both work. They trade flip-flop count against generality.
+
+**Option 1 — compact, 5-bit entries, 35 flip-flops (W4).**
+Slot `000` is hardwired to ZERO. The remaining 7 slots each hold `{s1[1:0], s2[1:0], en2}` = 5 bits. Total 7 × 5 = **35 flip-flops** per config domain. With extras (a per-column second bank, W2/W3 mode fields) the practical range is ~35–56 bits.
+
+**Option 2 — fully general, 6-bit entries, 48 flip-flops (W4).**
+All 8 slots are programmable. Each holds `{enA, selA[1:0], enB, selB[1:0]}` = 6 bits. Total 8 × 6 = **48 flip-flops**. Level = `enA·2^selA + enB·2^selB`, so `enA = enB = 0` naturally encodes zero, and zero can sit in *any* slot. This is the encoding used in the flip-flop-granularity diagrams.
+
+**Recommendation:** Option 2 for the paper figures and the RTL, because it makes "any legal codebook, any slot ordering" true without exceptions, and 13 extra flip-flops is nothing. Option 1 is the area-optimized variant to mention as a footnote.
+
+Either way, the crucial framing: **the table does not grow with the richness of the legal family.** Family richness enters only as the width of a select field — logarithmically. A 20-value legal family would still be a 6-or-7-bit entry.
+
+### 3.6 Concrete worked example: two W3-era bin sets on one silicon
+
+This is the figure that makes the whole "routed" argument land. Two different 8-magnitude codebooks, loaded into the same 48 flip-flops.
+
+- **Set 1** = `{0, 1, 2, 3, 4, 6, 8, 12}`
+- **Set 2** = `{0, 1, 2, 3, 4, 5, 6, 9}`
+
+Entry format below is `enA · selA · enB · selB`:
+
+| Code | Set 1 level | Set 1 entry | Set 2 level | Set 2 entry | Bits differing |
+|------|------------:|-------------|------------:|-------------|---------------:|
+| 000 | 0 | `0·00·0·00` | 0 | `0·00·0·00` | 0 |
+| 001 | 1 | `1·00·0·00` | 1 | `1·00·0·00` | 0 |
+| 010 | 2 | `1·01·0·00` | 2 | `1·01·0·00` | 0 |
+| 011 | 3 | `1·00·1·01` | 3 | `1·00·1·01` | 0 |
+| 100 | 4 | `1·10·0·00` | 4 | `1·10·0·00` | 0 |
+| 101 | 6 | `1·01·1·10` | 5 | `1·00·1·10` | 1 |
+| 110 | 8 | `1·11·0·00` | 6 | `1·01·1·10` | 3 |
+| 111 | 12 | `1·10·1·11` | 9 | `1·00·1·11` | 1 |
+
+**Total: 5 flip-flops differ out of 48.** Same decoder, same datapath, same read mux. Swapping the bin set is a register write, not a chip respin.
+
+> **A conceptual error to avoid, because it happened once already.** An early gate-level diagram drew *two separate decode logic clouds* for the two bin sets. That is wrong and it contradicts the entire architecture. There is **one** fixed programmable PE. A different bin set is different *register contents*, not different gates. If a diagram implies otherwise, it is wrong. This has been a recurring clarification point and should be watched for.
+
+The natural two-figure story for the paper: *"Figure N: a hardwired decoder is bin-set-specific. Figure N+1: our enable table makes it programmable."* The hardwired version is the motivation for why you don't want it.
+
+### 3.7 The three hardware tiers (a design taxonomy, not the design)
+
+- **Tier-0 — hardwired.** Bin set is baked into gates. Different codebook = different silicon. This is the strawman.
+- **Tier-1 — mode-selected.** A handful of pre-baked codebooks selected by a mode register.
+- **Tier-2 — fully programmable enable table.** The chosen design. 32–56 bits of routing config.
+
+(Note the unfortunate name collision: "Tier-1/Tier-2" also refers to one-term versus two-term *levels* in Section 1.2. Both usages appear in existing materials. Consider renaming one of them — perhaps levels become "single-term / dual-term" — before the paper.)
+
+### 3.8 The reclaimed −0 code
+
+Sign-magnitude with a zero level wastes one code, because `+0` and `−0` are the same number. At W4 that means 15 distinct values from 16 codes.
+
+Because the decoder is a routing table rather than an arithmetic interpretation, **the redundant `(sign=1, magnitude=0)` code can be remapped to any additional legal level** — say 5 or 9 — restoring 16 distinct values from 16 codes, at the cost of one extra table entry's worth of decode. Whether to use it, and which level gets it, is left to the software search: run the selection for the best 8 levels, then greedily add the best ninth.
+
+### 3.9 The asymmetry problem (an open issue, be honest about it)
+
+A real question came up: can the hardware express asymmetric uniform quantization, e.g. the range −4 to +3 at 3 bits? Two separate blockers:
+
+1. **7 is not in the legal family.** It would need `8 − 1`, and the datapath is add-only. So a clean 0–7 uniform ramp is not expressible; consecutive uniform integers survive only up to 6. (This missing 7 is exactly the gap the signed-second-term extension would fill.)
+2. **Sign-magnitude is inherently symmetric.** Every representable value has its negative also representable. There is no way to encode a level set running −4 to +3. Asymmetric integer quantization uses a zero-point offset, `w ≈ scale × (q − zp)`, which is different arithmetic.
+
+Three responses, in increasing hardware cost:
+
+- **Option A — reclaimed −0, asymmetric by one (cheapest, do this first).** Use the redundant `(s=1, z=0)` code for one extra level on one side. Gets a near-symmetric 8-value set that recovers the 8th level currently being lost to asymmetric uniform. Zero hardware change beyond the one table entry already specced.
+- **Option B — per-group zero-point offset (the real fix, moderate cost).** Carry a per-group integer `zp`. This is a genuine format change and it breaks the clean sign-magnitude symmetry the hardware likes. Only do this if A doesn't close the gap.
+- **Option C — uniform fallback as a first-class mode (architecturally cleanest).** Uniform wins on a small set of layers. Don't fight it — absorb it. Make asymmetric uniform one of the per-layer palette entries, or a 1-bit per-layer mode. Those layers run a standard zero-point uniform codebook; SHARQ codebooks run everywhere else.
+
+Option C also reframes the whole paper favorably: **SHARQ subsumes uniform rather than competing against it.** This is ablation **A7**.
+
+---
+
+## Part 4 — The software / algorithm side
+
+### 4.1 Base framework
+
+SHARQ is built on **BoA** (Best-of-All), Samsung Labs' post-training quantization framework. SHARQ replaces the level-set choice inside BoA's pipeline. The clip grid, group scales, and Hessian machinery are all reused unchanged.
+
+**Codebook selection is a pre-pass. BoA runs exactly once.**
+
+### 4.2 The five-stage pipeline
+
+1. **Calibration statistics.** Run the calibration set (~128 sequences), collect per-channel activation statistics `h_i ≈ E[x_i²]` per linear module. BoA needs equivalent statistics anyway, so this stage is shared.
+2. **Histogram construction.** For each layer, normalize weights by group max and accumulate a weighted magnitude histogram. Takes seconds for a whole model.
+3. **Exhaustive proxy search.** For each layer and its bit-width, score every deduplicated candidate over the clip grid. Fix the winning codebook and clip ratio. Seconds for a whole model.
+4. **BoA pass.** Run BoA unmodified except for its rounding target: wherever BoA rounds a weight, it rounds to the nearest level of that layer's selected codebook at the selected scale, rather than to a uniform grid. BoA's block-wise, backprop-free error compensation works exactly as before. The codebook is simply the set of representable points it compensates against.
+5. **Metadata emission.** Per-layer enable-table contents plus mode field.
+
+### 4.3 The scoring objective
+
+Candidates are ranked by **Hessian-weighted quantization distortion**. Each weight `w_i` carries importance `h_i ≈ E[x_i²]`, the mean squared activation of its input channel. This is the same diagonal-Hessian surrogate that drives GPTQ-class solvers, so the selection objective is aligned with what BoA subsequently optimizes. It also corrects a real bias in unweighted MSE, which over-rewards packing levels near zero.
+
+**The scale is searched jointly.** For each candidate codebook, sweep a grid of clipping ratios `c` (about 20 points) and set `α_g = c · max|w| / z_max` per group. Keep the best clip per candidate. Grid: `[0.8, 1.0]` at W4, widened to `[0.50, 1.00]` at W3/W2 where optimal clipping deviates much further from max-based scaling. **Do not hardwire max-based scaling** — it biases the comparison toward codebooks containing high tail levels.
+
+### 4.4 Histogram-accelerated scoring (the trick that makes it cheap)
+
+Naively quantizing every weight against every candidate and every clip value costs billions of operations per layer. Instead:
+
+- Collapse each layer once into a fixed ~1K-bin histogram over group-max-normalized magnitudes. Each bin accumulates both weight count and Hessian mass.
+- Scoring one (candidate, clip) pair becomes a sum over bins of Hessian mass × squared distance to the nearest scaled level: roughly 1024 × 8 operations.
+- About 10M operations per layer across all candidates and the whole clip grid.
+
+Whole-model codebook selection finishes in well under a minute, against a BoA runtime of tens of minutes. **Overhead ≈ 1% of quantization wall-clock.** Report this number; it justifies using the proxy.
+
+Bonus: the same histograms give the granularity ablation for free. Per-module, per-layer, per-model (pool histograms across layers), and universal (pool across models) selection all run from the same data.
+
+### 4.5 The oracle-first ladder (the current development strategy)
+
+This was a deliberate strategy shift after the early W3 failure. Instead of building the efficient thing first and hoping it's good enough, **build the most powerful and most wasteful selector first, establish the accuracy ceiling, then constrain downward and measure the toll at each rung.**
+
+| Rung | Selector | What it costs |
+|------|----------|---------------|
+| **R1** | Per-channel exhaustive oracle over the full legal family, with uniform always included as a fallback candidate | Accuracy ceiling. Impractically expensive. |
+| **R2** | Hessian-weighted histogram-pruned proxy | ~1% of BoA runtime |
+| **R3** | 4-codebook palette per layer; channels route to one of four | Smaller config, needs per-channel selector bits |
+| **R4** | Single per-layer codebook | One register write per layer |
+| **R5** | Universal codebook, fixed across models | Zero search at deploy time |
+
+Every rung is a paper ablation (**A3**). The ladder tells you exactly how much programmability the silicon must pay for.
+
+**Working hypothesis:** at W4, per-model and universal selection nearly tie, because eight well-placed levels with group-wise scaling cover the distributional variation. At W3 and especially W2, per-layer adaptation produces real gains, because with 2–4 magnitude levels the difference between layers needing tail coverage and layers needing near-zero density becomes material. **If results land this way, the narrative is: universality suffices at W4, and programmability earns its keep exactly at the aggressive bit-widths.** That is a strong, falsifiable story.
+
+### 4.6 Overfitting concern
+
+Picking bins per layer from calibration data is a mild overfitting risk in principle. In practice it is negligible: you are selecting 1 of ~165 discrete options against hundreds of thousands of weights, not fitting continuous parameters. Held-out perplexity validation handles it.
+
+---
+
+## Part 5 — Results so far
+
+| Setting | Model | Result | Notes |
+|---------|-------|--------|-------|
+| W4 SHARQ | OPT-125M | **~40.9 PPL** | Matches uniform BoA closely. This is the seed result. |
+| W3 SHARQ (first attempt) | OPT-125M | 80.8 PPL | Failure. No-zero codebooks selected + narrow clip grid. |
+| W3 SHARQ (fixed) | OPT-125M | **48.9 PPL** | After forcing zero-inclusive codebooks and widening clip grid to [0.50, 1.00]. |
+
+OPT-125M is the smoke-test model. Nothing at scale has been run yet.
+
+**The headline accuracy claim to defend:** SHARQ's W4 perplexity matches uniform W4 at the same protocol (W4A16, group 128), and the enable table recovers the accuracy that fixed codebooks lose at W3/W2.
+
+---
+
+## Part 6 — Positioning, related work, and venue
+
+### 6.1 Venue
+
+**Target: HPCA, MICRO, ISCA, or ASPLOS.** Secondary: DAC, ICCAD, DATE.
+
+The reasoning matters. This started as an MLSys or ICASSP idea. It moved to architecture venues once it became clear that **the real silicon PE is the primary contribution, not a GPU kernel.** MLSys would demand a kernel or prototype; AAAI would treat it as an incremental algorithms paper next to APoT and call it a day. An architecture venue is where "we co-designed a codebook and a PE, here is the synthesized area" is the expected currency.
+
+### 6.2 The competitive landscape
+
+| Work | What it is | Relationship to SHARQ |
+|------|-----------|----------------------|
+| **MixPE** (arXiv:2411.16158) | Mixed-precision PE using FP16 exponent scaling (their Eq. 7) | **The single most important reference.** Closest competitor, structural template for the paper, and the hardware baseline to beat. SHARQ uses their primitive; the delta is the popcount-≤2 codebook constraint and the programmable enable table. |
+| **ShiftAddLLM** | Shift-add LLM inference, BCQ with learned scaling factors | Non-uniform, more representational freedom than SHARQ. **Critical fact: its energy numbers come from a borrowed Eyeriss energy model, not real hardware.** It is a GPU paper. This is a meaningful competitive distinction in SHARQ's favor. |
+| **PoTPTQ** | Additive power-of-two levels | Non-uniform, closest algorithmic cousin. Must be re-run under SHARQ's protocol. |
+| **APoT** | Additive powers of two | The prior art that most threatens the novelty claim. Needs a clear, explicit answer in the related-work section. |
+| **NF4 / SqueezeLLM** | Unconstrained non-uniform codebooks | Accuracy upper bound with no hardware story. |
+| **LUT-GEMM / LUT Tensor Core** | Lookup-based decode | The alternative implementation a reviewer will raise. See 7.3. |
+| **GPTQ / AWQ / BoA** | Standard uniform W4A16 PTQ | The accuracy baseline. BoA is also the framework SHARQ is built on. |
+
+### 6.3 The correct framing — Pareto, not accuracy superiority
+
+**Say this, and do not overclaim:**
+
+> SHARQ sits at the most hardware-constrained end of the non-uniform spectrum by design. The claim is *comparable accuracy at strictly lower real silicon cost* than ShiftAddLLM and PoTPTQ — not accuracy superiority over them.
+
+SHARQ deliberately has fewer degrees of freedom than BCQ or additive-PoT methods. Claiming to beat them on accuracy would be fighting on the axis where SHARQ is designed to lose. The win is the Pareto frontier: MixPE's Figure 7 axis is SNR versus normalized area-power, and SHARQ should push that frontier past MixPE-A16.
+
+Similarly: **at iso-throughput and iso-clock, a SHARQ PE and a MixPE PE both retire one MAC per cycle.** There is no raw single-PE latency claim to make. If you want a headline "X× speedup," you must explicitly *reinvest* the area savings into more PEs per tile and say so. The depth-1 adder tree may also allow a higher clock, but that needs B1 to confirm.
+
+### 6.4 The accuracy burden
+
+MixPE-A16 keeps all 16 uniform levels, so **its accuracy is the W4 baseline for free.** SHARQ drops five levels and therefore owes the iso-accuracy argument. It has to be explicit and head-to-head: same W4A16, group 128, PPL within ε of uniform, at lower area-power.
+
+One genuine upside of A16: weight-only quantization is exactly the regime the whole PTQ literature reports (GPTQ, AWQ, BoA, ShiftAddLLM are all W4A16). So the **accuracy** table is apples-to-apples with the algorithms literature while the **hardware** table is versus MixPE-A16. Two coherent comparisons, not a mismatch.
+
+### 6.5 Baseline reuse strategy
+
+- **BoA results: copy directly.** SHARQ uses BoA's pipeline, so the protocol is identical and comparability is exact. No need to re-run.
+- **ShiftAddLLM and PoTPTQ: must be re-run independently under SHARQ's protocol.** These are the closest non-uniform competitors, and reviewers will scrutinize those rows hardest.
+
+---
+
+## Part 7 — Known numbers from the literature
+
+### 7.1 MixPE's reported hardware results
+
+From FPGA synthesis (Vivado 2023.1, Zynq UltraScale+ ZCU104):
+
+- **MixPE-A8: 54% area reduction vs. an INT8 PE.**
+- **MixPE-A16: 0.77× the area of an FP16 PE.**
+- 64% total power reduction; 2.44× end-to-end speedup.
+
+**Important caveat: these are FPGA LUT counts, and ASIC designers discount them.** The B1 synthesis run is the path to an ASIC-credible number below 0.77×. Until B1 lands, do not put a specific SHARQ area number in front of anyone.
+
+### 7.2 Energy reference points
+
+Horowitz 45nm energy-per-operation: FP16 multiply ≈ 1.1 pJ, FP16 add ≈ 0.4 pJ. These are the standard citation for back-of-envelope PE energy arguments.
+
+Literature-derived (not yet measured) SHARQ claims: ~1.8× energy-per-MAC advantage, 1.3–1.5× more PEs at iso-area, zero precompute overhead versus per-tile table rebuilding. **All of these must be marked as estimates pending B1/B6.**
+
+### 7.3 The LUT question — the reviewer question you must have an answer for
+
+*"Why shift-add and not a LUT? With only 11 FP16 levels and heavy activation reuse in an output-stationary array, a LUT-GEMM-style precompute of x × {11 levels} is a credible alternative."*
+
+The answer, and the trap:
+
+- **A LUT would make every 4-bit non-uniform codebook cost exactly the same.** Behind a LUT there is no hardware story left — only an accuracy fight against less-constrained methods, which SHARQ would lose by design. This is why a LUT implementation is *not* the thing to build.
+- **The LUT baseline (experiment B6) is defensive, not competitive.** Run it, report it, but frame it as "we considered this and here is why the routed datapath wins," not as a headline comparison.
+- **Scope the LUT claims to W4/W3.** The LUT Tensor Core paper (arXiv:2408.06003) shows that heavily co-designed LUTs *can* beat MACs at ≤2-bit weights. Do not make a blanket claim that covers W2.
+- LUT-GEMM software benchmarks show 16–24% precomputation overhead unfused, ~2.6% fused.
+
+---
+
+## Part 8 — Open design decisions (hardware)
+
+These were flagged in the hardware explainer as unresolved and need answers from the chip team:
+
+1. **Zero handling.** Hardwired slot 0 vs. `en1 = 0` encoding.
+2. **Subnormal / FTZ policy** on the exponent-adder output.
+3. **Exponent adder saturation** behavior on overflow/underflow.
+4. **Psum register width** and accumulator growth budget.
+5. **The redundant −0 code.** v1: alias it to zero. Later: reassign it as a 12th escape level if the search wants one.
+6. **Config domain granularity.** One table per array (v1) vs. per-layer (register write) vs. per-channel (v2, real area cost).
+7. **Scale unit placement.** One FP16/FP32 multiplier per drain lane. Off the critical loop — do not over-optimize.
+8. **Table placement.** Pre-decode at load (weight-stationary) vs. replicate per PE (streaming).
+9. **Verification.** A golden model already exists in the BoA-based Python pipeline. Every legal code, every FP16 activation class (normal, subnormal, zero, inf, NaN), both tiers, both signs — bit-exact vectors can be exported for the RTL testbench.
+10. **Naming collision** between Tier-1/Tier-2 *levels* and Tier-0/1/2 *hardware programmability tiers*. Fix before publication.
+
+---
+
+## Part 9 — The experiment plan
+
+### Group A — Software / accuracy
+
+| ID | Experiment | Priority |
+|----|-----------|----------|
+| **A1** | Main perplexity table. WikiText-2 and C4, W4/W3/W2, multiple models, full baseline set. | Must-have |
+| **A2** | Zero-shot downstream tasks via lm-eval-harness: PIQA, ARC-e, ARC-c, HellaSwag, WinoGrande, LAMBADA, optionally BoolQ. PPL alone is no longer accepted as sufficient. | Must-have |
+| **A3** | Oracle-first ladder ablation (R1→R5 from §4.5). The methodology figure. Report candidate counts 165/290/25 and the ~1% proxy cost. | Must-have |
+| **A4** | Enable-table programmability ablation. Fixed universal codebook (MixPE-style fixed grid) vs. per-model enable-table selection, across ≥4 models at W4/W3/W2. **Show the delta widens at W3/W2** — this is the axis MixPE structurally cannot have. Sub-sweep: 32 / 40 / 56-bit config budget vs. accuracy. | Must-have |
+| **A5** | Zero-inclusive vs. no-zero codebooks. Documents the real failure from §3.4. Small but explains a genuine design constraint. | Must-have |
+| **A6** | Clip-grid sensitivity. Justifies the [0.50, 1.00] grid. | Nice-to-have |
+| **A7** | Asymmetry handling: reclaimed −0 vs. per-group zero-point vs. uniform-as-selectable-mode. Lets you frame SHARQ as subsuming uniform. | Nice-to-have |
+| **A8** | SNR-vs-end-loss validation. MixPE uses quantization SNR as an accuracy proxy in its DSE. Show SNR correlates with PPL *for SHARQ codebooks* before relying on it in B5, or B5 is contestable. | Needed before B5 |
+| **A9** | Calibration robustness: PPL vs. calibration set size and source (C4 vs. WikiText). | Nice-to-have |
+
+### Group B — Hardware
+
+| ID | Experiment | Priority |
+|----|-----------|----------|
+| **B1** | **Single-PE area / power / timing.** Verilog RTL for the SHARQ-A16 PE; baselines are the MixPE-A16 PE (their Eq. 7, ≤4 partial products, depth-2 tree) and a plain FP16 PE. Optionally a SHARQ-A8 variant. **This is the critical path.** Target: an ASIC-credible area number below MixPE's 0.77×. | **Highest priority** |
+| **B2** | Partial-product sweep. Isolates the mechanism: area/power as a function of max partial products (1, 2, 3, 4). | Must-have |
+| **B3** | Systolic array integration. Both iso-area and iso-PE-count comparisons. | Must-have |
+| **B4** | End-to-end model energy and performance simulation. | Must-have |
+| **B5** | DSE Pareto frontier (needs A8 first). | Must-have |
+| **B6** | LUT-baseline comparison. Defensive result, scoped to W4/W3. | Must-have |
+
+**Current status: B1 is the pending item blocking everything hardware-side.** Until it lands, no specific SHARQ area number should be quoted to anyone.
+
+---
+
+## Part 10 — The software kernel deliverable
+
+Management has asked for a **software kernel version on a shorter timeline**, while the hardware PE stays on a multi-year build. This is a parallel track, not a replacement for the paper.
+
+### 10.1 GPU kernels
+
+SHARQ's non-uniform codebooks map naturally onto **LUT-based dequantization kernels** (the NF4 / Marlin-style approach). The GEMM dominates runtime, and a 16-entry shared-memory lookup costs effectively the same as a uniform affine dequant multiply-add. So there is no *penalty* for SHARQ in software — but there is also no *speedup*. Be honest about this internally: the software kernel demonstrates deployability, not the hardware thesis.
+
+### 10.2 W2 specifically — activation-side precompute
+
+At 2 bits, the preferred kernel structure flips from weight-side dequantization to **activation-side precompute**. With only 4 distinct levels, precompute every product of each activation with each level once. The inner loop becomes pure table lookups with no multiplies. This is the software analogue of the multiplier-free PE, and it is a nice narrative bridge between the two tracks.
+
+### 10.3 Qualcomm HTP / NPU deployment
+
+- **Hard constraint: the matrix engine supports only uniform affine integer quantization.** No non-uniform codebooks.
+- **But every SHARQ level is an exact integer in [−12, +12].** So SHARQ weights are *exactly* embeddable as INT8 uniform quantization with **zero accuracy loss**. This is a genuinely nice property that falls out of the popcount-≤2 integer construction.
+- **The cost:** DRAM-resident 8-bit weights carry 2–4× the bandwidth of packed 2–4-bit codes. That eats the compression win.
+- **The middle path:** a custom HVX decode pipeline that unpacks the low-bit codes and feeds the matrix engine.
+- **Paper value:** this NPU limitation is strong motivation for the SHARQ PE. Commercial NPUs *cannot* exploit non-uniform codebooks; that is precisely the gap the PE fills.
+
+Related terminology in this area: LUT-GEMM, BCQ, LPBQ, HTP, HVX, VTCM, HMX, T-MAC.
+
+---
+
+## Part 11 — Planned extensions
+
+### 11.1 The extension ladder (in order)
+
+1. **Signed second shift term.** `a − b` as well as `a + b`. This fills in 7, 11, 13, 14, 15 and makes clean uniform ramps expressible. Costs a subtract capability in the adder, which is cheap.
+2. **Wider shifts.** Extend the term set beyond {1,2,4,8}.
+3. **Third term.** Depth-2 tree, giving up the core structural advantage — only if accuracy demands it.
+4. **Exact O(KN²) dynamic-programming codebook search.** Replaces the exhaustive-over-legal-sets search with an optimal DP, useful once the legal family grows too large to enumerate.
+5. **Lagrangian bit allocation for mixed precision.** Choose per-layer bit-widths under a global budget.
+
+### 11.2 Low-rank residual branch
+
+Adding an FP16 `U·Vᵀ` correction on top of the quantized weights (the CALDERA / LQER / QuIP# family) has been confirmed to **compose cleanly** with the BoA pipeline via alternating optimization on the residual.
+
+**The mandatory caveat: honest effective-bits accounting.** A W2 model plus a rank-64 correction at a given layer is effectively something like W2.5. The fair comparison is therefore **W3 SHARQ at equivalent footprint**, not plain W2. Any evaluation that reports "W2 + low-rank" against "W2 baseline" will be correctly torn apart by reviewers. Report effective bits-per-weight explicitly.
+
+---
+
+## Part 12 — Working conventions and preferences
+
+Carried over so the new account matches the existing materials.
+
+**Visual language for all figures and slides:**
+- Fonts: **Space Grotesk** (headings/body), **IBM Plex Mono** (code, labels, register contents)
+- Palette: **teal** (`#0E7C7B`, fills `#E3F0EF`) and **copper** (`#B87333`, fills `#F4E6D6`) on a **light background** (`#F6F4EF`), dark text `#1B2422`, muted `#4B5450`
+- Figure benchmark: **MixPE's figure style.** One headline, one large diagram, one takeaway line per slide. Slides that get verbose get rejected.
+
+**Diagram expectations:**
+- Publication-ready SVGs, generated via Python scripts, rendered with cairosvg for verification.
+- **Genuine low-level detail is required.** Actual gates, flip-flops, register contents. High-level block abstractions that hide the mechanism have been pushed back on repeatedly. If a diagram stays at RT-level when gate-level was asked for, it will be sent back.
+
+**Framing discipline to maintain:**
+- **One fixed programmable PE.** Not multiple hardware variants. Config is register contents written at model/layer load. This has been the single most recurring correction.
+- **"Exponent adder," never "shifter"** in anything a chip designer will read.
+- **Pareto framing, never accuracy-superiority framing.**
+- Structural counts (adder count, tree depth, streamed bits) are exact by construction and can be stated freely. Synthesis numbers must be marked as pending B1.
+
+**Existing artifacts (in the old account, may need regenerating):**
+- Hardware explainer, single-file HTML with seven SVG figures, aimed at the LSI chip design team
+- Senior-management HTML slide deck, 10 slides, keyboard-navigable, MixPE figure style
+- Animated methodology webpage with a live decoder widget and mux playground
+- Various standalone SVGs including the one-hardware-two-loadings figure
+
+---
+
+## Part 13 — Glossary
+
+| Term | Meaning |
+|------|---------|
+| **SHARQ** | SHift-Add Routed Quantization |
+| **PE** | Processing element — one MAC unit in the systolic array |
+| **BoA** | Best-of-All, Samsung Labs' PTQ framework; SHARQ's backbone |
+| **PTQ** | Post-training quantization |
+| **W4A16** | 4-bit weights, FP16 activations |
+| **Legal family** | The 11 magnitudes `{0,1,2,3,4,5,6,8,9,10,12}` — the popcount-≤2 subset of UINT4 |
+| **Tier-1 level** | One shift term; adder bypassed, second path gated |
+| **Tier-2 level** | Two shift terms; adder active |
+| **Tier-0/1/2 hardware** | Hardwired / mode-selected / fully programmable table (different axis — see §3.7) |
+| **Enable table** | The register bank holding code→routing entries. Stores routing, not values. |
+| **Exponent adder** | 5-bit add into the FP16 exponent field. Formerly (badly) called a "shifter". |
+| **Group scale α** | Per-group FP16 scale, applied once per group outside the inner loop |
+| **Oracle-first ladder** | Build the strongest selector first, constrain downward, measure the toll |
+| **Palette** | 4 codebooks per layer, channels route to one (ladder rung R3) |
+| **Reclaimed −0** | Remapping the redundant sign-magnitude negative-zero code to an extra level |
+| **MixPE** | arXiv:2411.16158 — the key competitor and structural template |
+| **B1** | The pending single-PE synthesis run; current critical path |
+
+---
+
+## Part 14 — Immediate next actions
+
+1. **B1 synthesis.** Everything hardware-facing is blocked on it. Nothing quantitative goes to the chip team or into a draft until it lands.
+2. **Rename "shifter" → "exponent adder"** across the explainer, the slides, and any draft text.
+3. **Fix the Tier-1/Tier-2 naming collision** before writing the paper.
+4. **Update all candidate counts to 165 / 290 / 25** (the W3 figure of 290 is new and exact; earlier materials say "330" nominal or estimate "250–280").
+5. **Scale up the accuracy experiments** past OPT-125M. The current evidence is one small model.
+6. **Decide the encoding**: 5-bit compact (35 FF) vs. 6-bit general (48 FF). Recommendation is the 6-bit general form.
+7. **Answer the APoT novelty question** in writing. It is the prior-art threat most likely to draw a reject.
