@@ -1,0 +1,1185 @@
+% =====================================================================
+%  CrossCov-U: Cross-Covariance Bases for Score-Faithful Sparse Attention
+%  Draft structured after Loki (Singhania et al., NeurIPS 2024, arXiv:2406.02542).
+%  Placeholders are marked  \TODO{...}  and render in red.
+%  Comments marked "INTERNAL" carry prior run numbers for orientation only;
+%  re-verify every number before it goes into a table.
+% =====================================================================
+\documentclass[10pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,amsthm,mathtools}
+\usepackage{bm}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{caption}
+\usepackage{enumitem}
+\usepackage[colorlinks=true,linkcolor=blue,citecolor=blue,urlcolor=blue]{hyperref}
+\usepackage{natbib}
+
+% ---------- placeholders ----------
+\newcommand{\TODO}[1]{\textcolor{red}{[#1]}}
+\newcommand{\NUM}{\textcolor{red}{\texttt{x.xx}}}
+
+% ---------- math macros ----------
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\tr}{\operatorname{tr}}
+\newcommand{\diag}{\operatorname{diag}}
+\newcommand{\norm}[1]{\left\lVert #1 \right\rVert}
+\newcommand{\fro}[1]{\norm{#1}_F}
+\newcommand{\ip}[2]{\left\langle #1, #2 \right\rangle}
+\newcommand{\bq}{\mathbf{q}}
+\newcommand{\bk}{\mathbf{k}}
+\newcommand{\bx}{\mathbf{x}}
+\newcommand{\bK}{\mathbf{K}}
+\newcommand{\bQ}{\mathbf{Q}}
+\newcommand{\bV}{\mathbf{V}}
+\newcommand{\bU}{\mathbf{U}}
+\newcommand{\bW}{\mathbf{W}}
+\newcommand{\bC}{\mathbf{C}}
+\newcommand{\bM}{\mathbf{M}}
+\newcommand{\bP}{\mathbf{P}}
+\newcommand{\bI}{\mathbf{I}}
+\newcommand{\Sq}{\bm{\Sigma}_q}
+\newcommand{\Sk}{\bm{\Sigma}_k}
+\newcommand{\Sx}{\bm{\Sigma}_x}
+\newcommand{\Jal}{J_{\mathrm{align}}}
+\newcommand{\Jfl}{J_{\mathrm{fluc}}}
+\newcommand{\method}{CrossCov-U}
+
+\theoremstyle{plain}
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{corollary}[theorem]{Corollary}
+\theoremstyle{definition}
+\newtheorem{definition}[theorem]{Definition}
+\newtheorem{assumption}[theorem]{Assumption}
+\theoremstyle{remark}
+\newtheorem{remark}[theorem]{Remark}
+
+\title{\method{}: Cross-Covariance Bases for Score-Faithful\\Sparse Attention}
+\author{\TODO{Author list and affiliations}}
+\date{}
+
+\begin{document}
+\maketitle
+
+% =====================================================================
+\begin{abstract}
+Sparse attention methods such as Loki cut the cost of decoding by ranking the
+tokens in the KV-cache with attention scores computed in a low-dimensional
+space, and then computing exact attention only for the top-$k$ tokens.
+The quality of such a method rests entirely on one offline choice: the basis
+used to shrink queries and keys before scoring.
+Prior methods pick this basis by principal component analysis (PCA) of the keys,
+which minimizes key \emph{reconstruction} error.
+We show that this is the wrong objective.
+The quantity that matters for top-$k$ selection is the error in the
+\emph{score} $\bq^\top\bk$, and we prove that, under a Gaussian surrogate, the
+expected squared score error decomposes into a cross-covariance
+\emph{alignment} term plus a coupled \emph{fluctuation} term.
+Key-PCA minimizes a degenerate case of the second term and ignores the first.
+We propose \method{}, which builds a single shared orthonormal basis from the
+left singular vectors of the query--key cross-covariance $\E[\bk\bq^\top]$
+and is the exact minimizer of the natural surrogate of the alignment term.
+For grouped-query attention we show that pooling the cross-covariance across
+the query heads of a group is the exact minimizer of the group-summed objective,
+so \method{} needs no more bases than Loki and has identical runtime cost.
+Across \TODO{$N$} models, \method{} raises attention-mass recall by
+\TODO{$\Delta$}, lowers attention-output error by \TODO{$\times$}, and closes
+the perplexity gap to full attention from \TODO{$x$} to \TODO{$y$} at the same
+compression ratio, with \TODO{downstream accuracy summary}.
+\end{abstract}
+
+% =====================================================================
+\section{Introduction}
+\label{sec:intro}
+
+Autoregressive decoding with a large language model (LLM) must read the entire
+key--value (KV) cache at every generation step. At long context this cache can
+be larger than the model weights, and the cost of moving it from DRAM into
+registers dominates the attention step \citep{loki,sparq}. One popular way to
+reduce this cost without retraining is \emph{sparse attention by selection}:
+compute cheap approximate scores for every cached token, pick the top-$k$
+tokens, and run exact attention only on those. Because no token is ever
+deleted, selection avoids the permanent information loss of eviction methods
+\citep{h2o,streamingllm}.
+
+Loki \citep{loki} made selection practical by observing that attention keys
+have low effective rank. It fits PCA to keys from a calibration set, rotates
+queries and keys into that basis, and scores tokens using only the first $r$
+of $d$ coordinates. This works because PCA keeps the directions in which keys
+have the most energy, so the truncated keys stay close to the original keys.
+
+This paper starts from a simple point that is easy to miss:
+\emph{the selector never needs the keys to be close; it needs the scores to be
+close.} The score is a bilinear form $\bq^\top\bk$. A direction in key space
+that holds a lot of key energy contributes nothing to the score if queries
+never point along it. Conversely, a direction with little key energy can
+decide the ranking if queries consistently probe it. Key-PCA cannot see this
+distinction because it never looks at the queries. Figure~\ref{fig:toy} gives
+a two-dimensional example in which key-PCA collapses two keys that every
+query separates cleanly.
+
+We make this intuition precise. We write down the expected squared score error
+of a rank-$r$ shared-basis approximation and show that, under a joint-Gaussian
+surrogate, it splits into two parts (Theorem~\ref{thm:wick}): a
+\emph{residual alignment} term that depends only on the query--key
+cross-covariance $\bC=\E[\bk\bq^\top]$, and a \emph{coupled fluctuation} term
+that depends on the two auto-covariances through their product. Key-PCA
+minimizes the fluctuation term with the queries assumed isotropic and the
+alignment term dropped entirely. We then propose \method{}, whose basis is the
+top-$r$ left singular subspace of $\bC$. It is the exact minimizer of the
+natural Frobenius surrogate of the alignment term (Theorem~\ref{thm:ey}), it
+recovers Loki's basis exactly when queries are replaced by keys
+(Lemma~\ref{lem:collapse}), and it preserves inner products exactly at full
+rank (Lemma~\ref{lem:exact}). For grouped-query attention (GQA) we show that
+pooling $\bC$ over the query heads in a group is the exact minimizer of the
+group-summed surrogate (Theorem~\ref{thm:gqa}), so \method{} stores exactly one
+basis per KV head, the same as Loki.
+
+\method{} changes only the offline calibration statistic. The online algorithm,
+the memory layout, the kernels, and therefore the runtime cost are identical
+to Loki. Every accuracy gain we report is attributable to a single design
+choice.
+
+Our contributions are:
+\begin{itemize}[leftmargin=*,itemsep=1pt]
+  \item A decomposition of the expected squared score error of shared-basis
+        sparse attention into an alignment term and a fluctuation term, with
+        a mapping of Loki, SALS, SWAN and SVDq onto degenerate cases
+        (Section~\ref{sec:theory}).
+  \item \method{}: a closed-form basis from the cross-covariance
+        $\E[\bk\bq^\top]$ that is surrogate-optimal for the alignment term,
+        with a GQA-pooled construction that is exactly optimal for the
+        group-summed surrogate (Section~\ref{sec:method}).
+  \item A per-head \emph{alignment ratio} $\rho_h$ that predicts where
+        \method{} should beat key-PCA, and an offline oracle basis that
+        minimizes the full objective, used to measure how much of the
+        available gain \method{} captures (Sections~\ref{sec:rho},~\ref{sec:oracle}).
+  \item An evaluation on \TODO{models} showing higher attention-mass recall,
+        lower attention-output error, and a smaller perplexity gap than Loki
+        at matched compression, with \TODO{downstream tasks}
+        (Section~\ref{sec:results}).
+\end{itemize}
+
+\begin{figure}[t]
+  \centering
+  \fbox{\parbox{0.9\linewidth}{\centering\vspace{3.2cm}
+    \TODO{Figure 1. Left: 2-D toy. Two keys $\bk_A,\bk_B$ differ along a
+    low-energy direction $e_2$; key-PCA keeps $e_1$ and maps them to the same
+    point, while the query cloud lies along $e_2$ and separates them. The
+    \method{} axis (left singular vector of $\E[\bk\bq^\top]$) keeps $e_2$.
+    Right: overview of the pipeline (offline calibration $\to$ shared basis
+    $\bU$ $\to$ rank-$r$ latent scoring $\to$ top-$k$ $\to$ exact attention).}
+    \vspace{3.2cm}}}
+  \caption{\TODO{Toy example and method overview.}}
+  \label{fig:toy}
+\end{figure}
+
+% =====================================================================
+\section{Background and Related Work}
+\label{sec:background}
+
+\paragraph{Attention.}
+Consider one attention head with head dimension $d$. When generating token
+$S$, the head computes
+\begin{equation}
+  \label{eq:attn}
+  \mathbf{y} \;=\; \mathrm{softmax}\!\Big(\frac{\bq^\top \bK^\top}{\sqrt{d}}\Big)\bV,
+\end{equation}
+where $\bq\in\R^{d}$ is the current query and $\bK,\bV\in\R^{S\times d}$ hold
+the keys and values of all $S$ tokens seen so far. Modern models apply rotary
+position embeddings (RoPE) \citep{rope} to $\bq$ and $\bk$ before the dot
+product. We write $\bq,\bk$ for the vectors that actually enter the dot
+product and say explicitly when we mean pre-RoPE states.
+
+\paragraph{Grouped-query attention.}
+In GQA \citep{gqa}, a group of $G$ query heads shares one key head and one
+value head. We index query heads in a group by $g\in\{1,\dots,G\}$ and write
+$\bq^{(g)}$ for their queries; all of them score against the same $\bk$.
+
+\paragraph{Top-$k$ selection.}
+Selection methods compute an approximate score $\tilde s_j$ for every cached
+token $j$, keep the set $\mathcal{T}$ of the $k$ largest, and compute
+\eqref{eq:attn} restricted to $\mathcal{T}$. Loki obtains $\tilde s_j$ by
+rotating $\bq$ and $\bk_j$ into a PCA basis of the keys and using only the
+first $r$ coordinates, so the approximate scoring costs $O(Sr)$ instead of
+$O(Sd)$, and the exact part costs $O(kd)$.
+
+\subsection{Related Work}
+
+\paragraph{Low-rank keys and latent scoring.}
+Loki \citep{loki} showed that attention keys have low effective rank across
+many models and datasets, and used a per-head key-PCA basis for latent
+scoring. SALS \citep{sals} stores keys in a joint-head key-PCA basis and
+reconstructs only the selected keys, adding memory compression. SWAN
+\citep{swan} builds the basis from $\E[\bq\bq^\top]+\E[\bk\bk^\top]$. SVDq
+\citep{svdq} uses the key-PCA spectrum to allocate mixed precision across
+latent coordinates. All of these derive the basis from second moments of
+queries or keys separately; none uses the joint statistic $\E[\bk\bq^\top]$.
+Section~\ref{sec:theory} shows that each of them minimizes a degenerate case
+of the score-error objective.
+
+\paragraph{Query-aware dimension selection.}
+SparQ \citep{sparq} picks, per query, the coordinates where $|\bq|$ is
+largest and scores keys on those coordinates. It is query-aware but works in
+the standard coordinate system and needs non-contiguous column gathers; it
+also keeps two copies of the keys. \method{} is query-aware through
+calibration statistics, uses a fixed rotated basis, and keeps Loki's
+contiguous slicing.
+
+\paragraph{Cross-covariance in attention.}
+Lambda Networks \citep{lambda} contract positions first and express attention
+as a $d\times d$ matrix built from keys and values; the object
+$\bK^\top\bQ$ appears there as a \emph{trained replacement} for attention.
+\method{} uses $\bK^\top\bQ$ only as an offline calibration statistic for a
+post-hoc selector; the model is unchanged.
+
+\paragraph{Eviction and compression.}
+StreamingLLM \citep{streamingllm}, H2O \citep{h2o}, Scissorhands
+\citep{scissorhands}, KeyDiff \citep{keydiff} and Ada-KV \citep{adakv}
+permanently drop tokens. ShadowKV \citep{shadowkv} keeps a low-rank pre-RoPE
+key store on GPU and exact values on CPU. Quantization of the KV cache
+\citep{kivi} is complementary. \method{} is a pure selection method: the full
+cache is retained and one dimension reduction is used for scoring only.
+
+% (Continued in next chunk)
+
+% =====================================================================
+\section{Why Key Energy Is the Wrong Target}
+\label{sec:analysis}
+
+Loki's motivating analysis measures how much key variance the top-$r$
+principal components capture. We repeat that analysis and add the quantity
+that actually controls selection: how much \emph{score} the same subspace
+captures. This section is empirical; Section~\ref{sec:theory} gives the
+theory.
+
+\subsection{Setup}
+
+Fix a layer and head. From a calibration set of $N$ tokens we collect
+queries $\bQ\in\R^{N\times d}$ and keys $\bK\in\R^{N\times d}$ (both taken at
+the point where they enter the dot product; see
+Section~\ref{sec:rope} for pre- vs post-RoPE). We form three second-moment
+matrices:
+\begin{equation}
+  \label{eq:moments}
+  \Sk = \tfrac1N \bK^\top\bK,\qquad
+  \Sq = \tfrac1N \bQ^\top\bQ,\qquad
+  \bC = \tfrac1N \bK^\top\bQ \;\approx\; \E[\bk\bq^\top].
+\end{equation}
+$\Sk$ and $\Sq$ are symmetric positive semidefinite; $\bC$ is square but
+generally not symmetric. Loki's basis is the eigenbasis of $\Sk$.
+
+For any rank-$r$ orthonormal $\bU\in\R^{d\times r}$ we define two capture
+ratios:
+\begin{align}
+  \label{eq:capture}
+  \mathrm{KeyEnergy}_r(\bU) &= \frac{\tr(\bU^\top\Sk\bU)}{\tr(\Sk)},&
+  \mathrm{ScoreEnergy}_r(\bU) &= \frac{\fro{\bU^\top\bC}^2}{\fro{\bC}^2}.
+\end{align}
+The first is Loki's ``explained variance''. The second is the fraction of
+squared cross-covariance retained by $\bU$; Theorem~\ref{thm:ey} shows it is
+the quantity a score-faithful basis should maximize.
+
+\subsection{Findings}
+
+\begin{figure}[t]
+  \centering
+  \fbox{\parbox{0.9\linewidth}{\centering\vspace{3cm}
+  \TODO{Figure 2. For each layer (x-axis), the rank at which 90\% of key
+  energy is captured (Loki's metric) and the rank at which 90\% of score
+  energy is captured, for the key-PCA basis and the \method{} basis.
+  Panels: Llama-2-7B, Mistral-7B, Llama-3.1-8B-Instruct. Pre- and post-RoPE
+  as separate line styles.}
+  \vspace{3cm}}}
+  \caption{\TODO{Key-energy rank vs score-energy rank across layers.}}
+  \label{fig:rank}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \fbox{\parbox{0.9\linewidth}{\centering\vspace{3cm}
+  \TODO{Figure 3. Per-head alignment ratio $\rho_h$ (Definition~\ref{def:rho}),
+  shown as a heat map over (layer, KV head) for each model.}
+  \vspace{3cm}}}
+  \caption{\TODO{Alignment ratio $\rho_h$ across layers and heads.}}
+  \label{fig:rho}
+\end{figure}
+
+We observe the following on \TODO{models} with \TODO{calibration sets}.
+\begin{enumerate}[leftmargin=*,itemsep=1pt]
+  \item \textbf{Key-PCA captures key energy but not score energy.} At the
+  rank where key-PCA captures 90\% of key energy, it captures only
+  \TODO{$x$\%} of score energy on average (Figure~\ref{fig:rank}). The
+  \method{} basis captures \TODO{$y$\%} at the same rank.
+  \item \textbf{The gap is head-dependent.} Heads with a large alignment ratio
+  $\rho_h$ (Figure~\ref{fig:rho}) show the largest gap. These are the heads
+  where queries and keys are systematically aligned, i.e., heads that do
+  content-based retrieval.
+  \item \textbf{The structure is stable across calibration data.} The
+  \method{} basis fitted on \TODO{dataset A} captures \TODO{$z$\%} of the
+  score energy measured on \TODO{dataset B}, matching the cross-dataset
+  stability Loki reported for key-PCA.
+  \item \textbf{RoPE matters for both bases.} As in Loki, post-RoPE states
+  have higher rank than pre-RoPE states. The fitted basis must be applied to
+  states of the same kind it was fitted on (Section~\ref{sec:rope}).
+\end{enumerate}
+% INTERNAL (verify): held-out split on Mistral-7B, r=8, k=0.125 — CrossCov PPL gap
+% +0.053 vs Loki +1.298; relL2 and mass recall nearly unchanged from in-sample.
+
+\begin{definition}[Alignment ratio]
+\label{def:rho}
+For a head $h$ with moments $\bC_h,\Sq[,h],\Sk[,h]$, define
+\begin{equation}
+  \label{eq:rho}
+  \rho_h \;=\; \frac{\fro{\bC_h}^2}{\tr(\Sq[,h])\,\tr(\Sk[,h])/d}.
+\end{equation}
+\end{definition}
+$\rho_h$ compares the systematic query--key alignment with the product of
+the two total energies, normalized so that independent isotropic $\bq,\bk$
+give $\rho_h\approx 1/d$ up to sampling noise. Theorem~\ref{thm:wick}
+explains why $\rho_h$ predicts the advantage of \method{} over key-PCA.
+
+% =====================================================================
+\section{Theory: Score-Faithful Bases}
+\label{sec:theory}
+
+\subsection{Setup and the exact objective}
+\label{sec:setup}
+
+Let $\bU\in\R^{d\times r}$ have orthonormal columns, $\bU^\top\bU=\bI_r$.
+Define the projector onto its span and its complement,
+\begin{equation}
+  \bP=\bU\bU^\top,\qquad \bM=\bI-\bP,\qquad \bP^2=\bP,\;\bM^2=\bM,\;\tr\bM=d-r.
+\end{equation}
+A \emph{shared-basis} approximation scores a token by
+\begin{equation}
+  \label{eq:latent}
+  \tilde s(\bq,\bk) = (\bU^\top\bq)^\top(\bU^\top\bk) = \bq^\top\bP\bk,
+\end{equation}
+so the score error is $s-\tilde s = \bq^\top\bk-\bq^\top\bP\bk = \bq^\top\bM\bk$.
+Loki, SALS, SWAN and \method{} all have this form at inference time; they
+differ only in how $\bU$ is chosen offline. The natural target is the
+expected squared score error over the joint distribution of $(\bq,\bk)$
+induced by the calibration corpus:
+\begin{equation}
+  \label{eq:J}
+  J(\bU) \;=\; \E\big[(\bq^\top\bM\bk)^2\big].
+\end{equation}
+
+\begin{remark}[Why $J$ and not ranking loss]
+Top-$k$ selection depends on the order of scores, not their values. But the
+ordering is a discontinuous function of the scores, and any bound on ranking
+error must go through the score error. $J$ is the smallest smooth objective
+that controls it: a token with true score $s_j$ and approximate score
+$\tilde s_j$ leaves the top-$k$ set only if $|s_j-\tilde s_j|$ exceeds its
+margin to the $k$-th score. Section~\ref{sec:results} shows empirically that
+lower $J$ tracks higher attention-mass recall, lower attention-output error
+and lower perplexity.
+\end{remark}
+
+\subsection{Two elementary properties}
+
+\begin{lemma}[Exactness at full rank; failure of the asymmetric variant]
+\label{lem:exact}
+Let $\bU\in\R^{d\times d}$ be orthogonal. Then $\bq^\top\bP\bk=\bq^\top\bk$
+for all $\bq,\bk$. In contrast, for any two orthogonal
+$\bU,\bV\in\R^{d\times d}$, the asymmetric score
+$(\bV^\top\bq)^\top(\bU^\top\bk)=\bq^\top\bV\bU^\top\bk$ equals
+$\bq^\top\bk$ for all $\bq,\bk$ if and only if $\bV=\bU$.
+\end{lemma}
+\begin{proof}
+If $\bU$ is square and orthogonal then $\bP=\bU\bU^\top=\bI$ and the first
+claim is immediate. For the second, $\bq^\top\bV\bU^\top\bk=\bq^\top\bk$ for
+all $\bq,\bk$ means $\bV\bU^\top=\bI$, i.e.\ $\bV=\bU$ since $\bU$ is
+orthogonal. Otherwise $\bV\bU^\top$ is a non-identity rotation and there
+exist $\bq,\bk$ with $\bq^\top\bV\bU^\top\bk\neq\bq^\top\bk$.
+\end{proof}
+
+Lemma~\ref{lem:exact} explains a negative result we obtained early on. The
+singular value decomposition $\bC=\bU\bm{\Sigma}\bV^\top$ offers two natural
+factors, and the tempting design is to project keys with $\bU$ and queries
+with $\bV$. This does not converge to exact attention as $r\to d$, because the
+full-rank map $\bV\bU^\top$ is a rotation, not the identity. Experimentally
+its recall sat at the random-guessing floor. The deployable object is the
+\emph{shared} left singular subspace, for which $\bP\to\bI$ as $r\to d$.
+
+\begin{lemma}[Pointwise score-error bound]
+\label{lem:pointwise}
+For any $\bq,\bk$ and projector $\bM$,
+$|\bq^\top\bM\bk| \le \norm{\bM\bq}\,\norm{\bM\bk}$.
+\end{lemma}
+\begin{proof}
+$\bq^\top\bM\bk=(\bM\bq)^\top(\bM\bk)$ since $\bM=\bM^\top=\bM^2$; apply
+Cauchy--Schwarz.
+\end{proof}
+
+Lemma~\ref{lem:pointwise} is the analogue of Loki's Lemma~4.2. Key-PCA
+minimizes $\E\norm{\bM\bk}^2=\tr(\bM\Sk)$, i.e.\ the second factor only. The
+bound is loose in exactly the situation of Figure~\ref{fig:toy}: the residual
+key is large but orthogonal to every residual query.
+
+\subsection{Decomposition of the objective}
+\label{sec:wick}
+
+\begin{assumption}[Gaussian surrogate]
+\label{ass:gauss}
+$(\bq,\bk)$ are jointly Gaussian with zero mean, cross-covariance
+$\bC=\E[\bk\bq^\top]$ and auto-covariances $\Sq=\E[\bq\bq^\top]$,
+$\Sk=\E[\bk\bk^\top]$.
+\end{assumption}
+
+The zero-mean part is a convenience; Remark~\ref{rem:mean} handles means.
+The Gaussian part is used only to close the fourth moment; the first term of
+the decomposition below holds without it.
+
+\begin{theorem}[Alignment--fluctuation decomposition]
+\label{thm:wick}
+Under Assumption~\ref{ass:gauss},
+\begin{equation}
+  \label{eq:wick}
+  J(\bU)
+  = \underbrace{(\tr\bM\bC)^2 + \tr(\bM\bC\bM\bC)}_{\Jal(\bU)}
+  \;+\;
+  \underbrace{\tr(\bM\Sq\bM\Sk)}_{\Jfl(\bU)} .
+\end{equation}
+Without the Gaussian assumption, $J(\bU)=(\tr\bM\bC)^2+\mathrm{Var}(\bq^\top\bM\bk)$
+still holds; only the expression for the variance uses Gaussianity.
+\end{theorem}
+\begin{proof}
+Write $\bq^\top\bM\bk=\sum_{i,j}M_{ij}q_ik_j$. Then
+\[
+J=\sum_{i,j,a,b}M_{ij}M_{ab}\,\E[q_ik_jq_ak_b].
+\]
+By Isserlis' theorem for zero-mean Gaussians,
+$\E[q_ik_jq_ak_b]=\E[q_ik_j]\E[q_ak_b]+\E[q_iq_a]\E[k_jk_b]+\E[q_ik_b]\E[q_ak_j]$.
+Using $C_{ji}=\E[k_jq_i]$, $(\Sq)_{ia}=\E[q_iq_a]$, $(\Sk)_{jb}=\E[k_jk_b]$,
+the three pairings give:
+\begin{align*}
+  \sum M_{ij}C_{ji}\sum M_{ab}C_{ba} &= (\tr\bM\bC)^2,\\
+  \sum_{i,j,a,b} M_{ij}(\Sq)_{ia}M_{ab}(\Sk)_{jb}
+   &= \sum_{j,b}\big(\bM^\top\Sq\bM\big)_{jb}(\Sk)_{jb}
+    = \tr(\bM\Sq\bM\Sk),\\
+  \sum_{i,j,a,b} M_{ij}C_{bi}M_{ab}C_{ja}
+   &= \sum_{i,a}\Big(\sum_j M_{ij}C_{ja}\Big)\Big(\sum_b M_{ab}C_{bi}\Big)
+    = \sum_{i,a}(\bM\bC)_{ia}(\bM\bC)_{ai}
+    = \tr(\bM\bC\bM\bC),
+\end{align*}
+where we used $\bM=\bM^\top$ and $\Sk=\Sk^\top$ in the second line.
+For the non-Gaussian statement, $\E[\bq^\top\bM\bk]=\tr(\bM\bC)$ and
+$\E[X^2]=(\E X)^2+\mathrm{Var}X$.
+\end{proof}
+
+\begin{remark}[Non-zero means]
+\label{rem:mean}
+If $\bq=\bar\bq+\bq'$, $\bk=\bar\bk+\bk'$ with centered $\bq',\bk'$, then
+$\bq^\top\bM\bk=\bar\bq^\top\bM\bar\bk+\bar\bq^\top\bM\bk'+\bq'^\top\bM\bar\bk+\bq'^\top\bM\bk'$.
+The uncentered second moment $\E[\bk\bq^\top]=\bar\bk\bar\bq^\top+\bC'$ that
+we compute in practice therefore already includes the mean product, and the
+extra cross terms are of the form $\bar\bq^\top\bM\,\bk'$, which the Frobenius
+surrogate of Section~\ref{sec:surrogate} also controls since
+$\E(\bar\bq^\top\bM\bk')^2=\bar\bq^\top\bM\Sk'\bM\bar\bq\le\norm{\bar\bq}^2\tr(\bM\Sk'\bM)$.
+We use uncentered moments throughout.
+\end{remark}
+
+\paragraph{Interpretation.}
+$\Jal$ is the systematic query--key correlation left in the discarded
+subspace: if keys and queries are consistently aligned along a direction,
+throwing that direction away biases every score. $\Jfl$ is residual query
+energy times residual key energy, coupled through the shared discarded
+directions; it is the error one would see even with no systematic alignment.
+
+\subsection{Prior methods as degenerate cases}
+\label{sec:degenerate}
+
+\begin{proposition}[What prior bases minimize]
+\label{prop:degenerate}
+Over rank-$r$ projectors $\bP$:
+\begin{enumerate}[leftmargin=*,itemsep=1pt]
+  \item[(a)] Key-PCA (Loki, SALS, Palu, SVDq) minimizes $\tr(\bM\Sk)$, which
+  equals $\Jfl$ when $\Sq=\bI$; it ignores $\Jal$ entirely. Equivalently it
+  minimizes $J$ under the two false assumptions $\bC=\mathbf{0}$ and
+  isotropic queries.
+  \item[(b)] SWAN minimizes $\tr(\bM\Sq)+\tr(\bM\Sk)$, an additive surrogate
+  of the multiplicative $\Jfl$; it also ignores $\Jal$.
+  \item[(c)] \method{} minimizes $\fro{\bM\bC}^2$, a surrogate that upper
+  bounds $\Jal$ (Proposition~\ref{prop:bound}).
+\end{enumerate}
+\end{proposition}
+\begin{proof}
+(a) With $\Sq=\bI$, $\tr(\bM\bI\bM\Sk)=\tr(\bM^2\Sk)=\tr(\bM\Sk)$ because
+$\bM^2=\bM$. Loki's basis is the top-$r$ eigenbasis of $\Sk$, which is the
+minimizer of $\tr(\bM\Sk)$ by the Ky~Fan inequality. (b) and (c) are the
+stated objectives of the respective methods; see Section~\ref{sec:surrogate}
+for (c).
+\end{proof}
+
+\begin{proposition}[Product versus sum]
+\label{prop:prodsum}
+Suppose $\Sq$ and $\Sk$ commute, with common eigenbasis and eigenvalues
+$\{a_i\}$, $\{b_i\}$. Among projectors diagonal in that basis that discard a
+coordinate set $D$ with $|D|=d-r$,
+\begin{equation}
+  \Jfl=\tr(\bM\Sq\bM\Sk)=\sum_{i\in D}a_ib_i .
+\end{equation}
+The exact minimizer discards the coordinates with the smallest
+\emph{products} $a_ib_i$; SWAN discards the smallest \emph{sums} $a_i+b_i$;
+key-PCA discards the smallest $b_i$. These disagree exactly when the spectra
+are imbalanced: a direction with large query energy but negligible key energy
+is kept by SWAN and correctly discarded by the product rule.
+\end{proposition}
+\begin{proof}
+In the common eigenbasis $\bM=\diag(m_i)$ with $m_i\in\{0,1\}$,
+$\Sq=\diag(a_i)$, $\Sk=\diag(b_i)$, so
+$\tr(\bM\Sq\bM\Sk)=\sum_i m_i^2a_ib_i=\sum_{i\in D}a_ib_i$.
+\end{proof}
+The restriction to axis-aligned projectors is for illustration; the
+unconstrained minimizer of $\Jfl$ need not be axis-aligned.
+
+\subsection{The \method{} basis and its optimality}
+\label{sec:surrogate}
+
+\begin{theorem}[Eckart--Young for the alignment surrogate]
+\label{thm:ey}
+Over rank-$r$ orthonormal $\bU$, the surrogate
+\begin{equation}
+  \label{eq:surrogate}
+  \hat J(\bU)=\fro{\bM\bC}^2=\fro{(\bI-\bU\bU^\top)\bC}^2
+\end{equation}
+is minimized by $\bU^\star=$ the top-$r$ left singular vectors of $\bC$,
+equivalently the top-$r$ eigenvectors of $\bC\bC^\top$. The minimum value is
+$\sum_{i>r}\sigma_i(\bC)^2$.
+\end{theorem}
+\begin{proof}
+$\fro{\bM\bC}^2=\tr(\bC^\top\bM^2\bC)=\tr(\bC^\top\bC)-\tr(\bC^\top\bP\bC)
+=\fro{\bC}^2-\tr(\bU^\top\bC\bC^\top\bU)$.
+Minimizing $\hat J$ is therefore maximizing $\tr(\bU^\top\bC\bC^\top\bU)$
+over orthonormal $\bU$. By the Ky~Fan maximum principle this is at most the
+sum of the $r$ largest eigenvalues of $\bC\bC^\top$, attained when the
+columns of $\bU$ span the corresponding eigenspace. The eigenvectors of
+$\bC\bC^\top$ are the left singular vectors of $\bC$ and its eigenvalues are
+$\sigma_i(\bC)^2$, which gives the minimum value.
+\end{proof}
+
+\begin{proposition}[The surrogate controls both alignment terms]
+\label{prop:bound}
+For any projector $\bM$ of rank $d-r$,
+\begin{equation}
+  |\tr(\bM\bC\bM\bC)|\le\fro{\bM\bC}^2,\qquad
+  (\tr\bM\bC)^2\le(d-r)\fro{\bM\bC}^2,
+\end{equation}
+hence $\Jal\le(d-r+1)\fro{\bM\bC}^2$, and $\bU^\star$ of Theorem~\ref{thm:ey}
+minimizes this bound exactly.
+\end{proposition}
+\begin{proof}
+First inequality: $\tr(\bM\bC\bM\bC)=\tr\big((\bM\bC)(\bM\bC)\big)
+=\ip{(\bM\bC)^\top}{\bM\bC}_F\le\fro{(\bM\bC)^\top}\fro{\bM\bC}=\fro{\bM\bC}^2$
+by the trace Cauchy--Schwarz inequality.
+Second: $\tr(\bM\bC)=\tr(\bM\cdot\bM\bC)=\ip{\bM}{\bM\bC}_F$, and
+$\fro{\bM}^2=\tr\bM=d-r$, so $(\tr\bM\bC)^2\le\fro{\bM}^2\fro{\bM\bC}^2=(d-r)\fro{\bM\bC}^2$.
+\end{proof}
+
+\begin{proposition}[Exact optimality under isotropic fluctuations]
+\label{prop:iso}
+If $\Sq=\sigma_q^2\bI$ and $\Sk=\sigma_k^2\bI$ then
+$\Jfl=\sigma_q^2\sigma_k^2(d-r)$ is constant in $\bU$, so minimizing $J$ is
+minimizing $\Jal$ alone. If in addition $\bC$ is symmetric positive
+semidefinite, the top-$r$ eigenbasis of $\bC$ minimizes $J$ exactly.
+\end{proposition}
+\begin{proof}
+$\tr(\bM\sigma_q^2\bI\bM\sigma_k^2\bI)=\sigma_q^2\sigma_k^2\tr(\bM^2)=\sigma_q^2\sigma_k^2(d-r)$.
+If $\bC=\bC^\top\succeq0$ with eigenvalues $c_1\ge\dots\ge c_d\ge0$, let
+$\mu_1\ge\dots\ge\mu_{d-r}$ be the eigenvalues of the compression $\bM\bC\bM$
+restricted to $\mathrm{range}(\bM)$. Then $\tr(\bM\bC)=\sum_i\mu_i$ and, using
+$\bM^2=\bM$ and cyclicity, $\tr(\bM\bC\bM\bC)=\tr\big((\bM\bC\bM)^2\big)=\sum_i\mu_i^2$.
+By Cauchy interlacing, $\mu_i\ge c_{r+i}$ for every $i$, so both sums are at
+least their values at the axis-aligned choice that discards the $d-r$
+smallest eigen-directions, and that choice attains them. Hence the top-$r$
+eigenbasis of $\bC$ minimizes $\Jal$, and since $\bC$ is symmetric PSD its
+left singular vectors are its eigenvectors, so this is the \method{} basis.
+\end{proof}
+
+\begin{corollary}[Regime prediction]
+\label{cor:regime}
+When $\fro{\bC}^2$ is large relative to $\tr(\Sq)\tr(\Sk)/d$ (large $\rho_h$),
+$\Jal$ dominates $J$ and the \method{} basis is near-optimal. When $\rho_h$ is
+small, $\Jfl$ dominates and the optimal basis moves toward
+coupled-auto-covariance structure. The advantage of \method{} over key-PCA is
+therefore predicted to increase with $\rho_h$.
+\end{corollary}
+
+\begin{lemma}[Loki is the self-collapse of \method{}]
+\label{lem:collapse}
+If queries are replaced by keys in the calibration statistic, i.e.\
+$\bC\leftarrow\E[\bk\bk^\top]=\Sk$, then the \method{} basis equals the key-PCA
+basis.
+\end{lemma}
+\begin{proof}
+$\Sk$ is symmetric PSD, so its left singular vectors are its eigenvectors
+ordered by eigenvalue, which is the PCA basis.
+\end{proof}
+Lemma~\ref{lem:collapse} is a useful unit test: pointing the calibration code
+at key tensors on both sides must reproduce Loki's components bit-for-bit.
+
+\subsection{Grouped-query attention}
+\label{sec:gqa}
+
+Under GQA, one key head serves $G$ query heads, so there are $G$
+cross-covariances $\bC_g=\E[\bk\,\bq^{(g)\top}]$ per KV head. Loki stores one
+basis per KV head. A fair comparison must do the same.
+
+\begin{theorem}[GQA pooling is exactly surrogate-optimal]
+\label{thm:gqa}
+Define the group-summed surrogate $\hat J_{\mathrm{grp}}(\bU)=\sum_{g=1}^G\fro{\bM\bC_g}^2$.
+It is minimized by the top-$r$ eigenvectors of
+$\mathbf{A}=\sum_{g=1}^G\bC_g\bC_g^\top$, equivalently the top-$r$ left
+singular vectors of the horizontally stacked matrix
+$[\bC_1\,|\,\bC_2\,|\cdots|\,\bC_G]\in\R^{d\times Gd}$.
+\end{theorem}
+\begin{proof}
+$\sum_g\fro{\bM\bC_g}^2=\fro{\bM[\bC_1|\cdots|\bC_G]}^2$ since the Frobenius
+norm of a block-row matrix is the sum over blocks. Apply
+Theorem~\ref{thm:ey} to the stacked matrix; its left singular vectors are the
+eigenvectors of $[\bC_1|\cdots|\bC_G][\bC_1|\cdots|\bC_G]^\top=\sum_g\bC_g\bC_g^\top$.
+\end{proof}
+
+This promotes GQA pooling from a heuristic to the exact solution of the
+group-summed problem, and it gives \method{} the same basis count and storage
+as Loki. It also contrasts with SALS's joint-head lemma, which argues only
+that stacking key auto-covariances across heads captures at least as much key
+energy; Theorem~\ref{thm:gqa} is a statement about score error and respects
+the GQA score structure (each $\bq^{(g)}$ really does score against the same
+$\bk$).
+
+\begin{remark}[Per-query-head upper bound]
+Fitting a separate basis $\bU_g$ from each $\bC_g$ minimizes each
+$\fro{\bM_g\bC_g}^2$ individually and therefore lower-bounds
+$\hat J_{\mathrm{grp}}$; but it requires $G$ latent copies of every key. We
+report it as an oracle to show how much the shared constraint costs
+(Section~\ref{sec:results}).
+\end{remark}
+
+\subsection{Pre-RoPE closed form and the oracle basis}
+\label{sec:oracle}
+
+Before RoPE, $\bq^{(g)}=\bW_q^{(g)}\bx$ and $\bk=\bW_k\bx$ are linear in the
+same hidden state $\bx\in\R^{d_{\mathrm{model}}}$ with second moment
+$\Sx=\E[\bx\bx^\top]$. Then
+\begin{equation}
+  \label{eq:closedform}
+  \begin{aligned}
+  \bC_g&=\bW_k\Sx\bW_q^{(g)\top},&
+  \Sq^{(g)}&=\bW_q^{(g)}\Sx\bW_q^{(g)\top},\\
+  \Sk&=\bW_k\Sx\bW_k^\top,&
+  \mathbf{A}&=\bW_k\Sx\Big(\sum_g\bW_q^{(g)\top}\bW_q^{(g)}\Big)\Sx\bW_k^\top .
+  \end{aligned}
+\end{equation}
+Every term of \eqref{eq:wick} is therefore a known function of the weights
+and a single $d_{\mathrm{model}}\times d_{\mathrm{model}}$ calibration
+statistic. This has two uses.
+
+\paragraph{Oracle basis.}
+The full group-summed objective
+$J_{\mathrm{grp}}(\bU)=\sum_g\big[(\tr\bM\bC_g)^2+\tr(\bM\bC_g\bM\bC_g)+\tr(\bM\Sq^{(g)}\bM\Sk)\big]$
+is a smooth function on the Grassmannian $\mathrm{Gr}(r,d)$. At $d=128$ it
+can be minimized offline per KV head by Riemannian gradient descent
+(Appendix~\ref{app:oracle}) in seconds. We call the result the
+\emph{$J$-opt oracle}. It is deployable (it is just another fixed basis), and
+it lets us report what fraction of the Loki$\to$oracle gap each closed-form
+basis closes. If \method{} closes most of it, the closed form is the right
+headline; if not, the oracle itself is the method.
+
+\paragraph{Sanity check of the surrogate.}
+Because \eqref{eq:closedform} needs only $\Sx$, we can evaluate $J$ for any
+candidate basis and check that the Gaussian-surrogate ranking of bases agrees
+with the empirical score MSE $\frac1N\sum_n(\bq_n^\top\bM\bk_n)^2$ and with
+downstream recall. Section~\ref{sec:results} reports this agreement.
+
+% (Continued in next chunk)
+
+% =====================================================================
+\section{\method{}: Algorithm and Cost}
+\label{sec:method}
+
+\method{} has the same two phases as Loki. Only the statistic diagonalized in
+the offline phase changes.
+
+\subsection{Offline calibration}
+
+For each layer and each KV head we run the model on a calibration corpus of
+$N$ tokens (Section~\ref{sec:setup_exp}) and accumulate, for each query head
+$g$ in the group, $\bC_g=\frac1N\bK^\top\bQ^{(g)}$. We form
+$\mathbf{A}=\sum_g\bC_g\bC_g^\top$, take its eigendecomposition
+$\mathbf{A}=\bU_{\mathrm{full}}\bm{\Lambda}\bU_{\mathrm{full}}^\top$ with
+eigenvalues in descending order, and store the complete orthogonal matrix
+$\bU_{\mathrm{full}}\in\R^{d\times d}$ (Algorithm~\ref{alg:offline}). Storing
+all $d$ columns, as Loki does, keeps the online rotation exact
+(Lemma~\ref{lem:exact}): the first $r$ columns give the latent scores and the
+full rotation gives exact scores on the selected tokens.
+
+\begin{algorithm}[t]
+\caption{\method{} offline calibration (one layer, one KV head)}
+\label{alg:offline}
+\begin{algorithmic}[1]
+\Require calibration states $\bK\in\R^{N\times d}$, $\bQ^{(1..G)}\in\R^{N\times d}$ taken at the point where they enter the dot product
+\State $\mathbf{A}\gets\mathbf{0}_{d\times d}$
+\For{$g=1,\dots,G$}
+  \State $\bC_g\gets\frac1N\bK^\top\bQ^{(g)}$ \Comment{cross-covariance, $d\times d$}
+  \State $\mathbf{A}\gets\mathbf{A}+\bC_g\bC_g^\top$
+\EndFor
+\State $(\bm{\Lambda},\bU_{\mathrm{full}})\gets\mathrm{eigh}(\mathbf{A})$, columns sorted by descending eigenvalue
+\State \textbf{assert} $\bU_{\mathrm{full}}^\top\bU_{\mathrm{full}}=\bI$ (orthonormality)
+\State \textbf{emit} $\bU_{\mathrm{full}}$ and metadata \{rotary type, calibration set, $G$\}
+\end{algorithmic}
+\end{algorithm}
+
+\begin{algorithm}[t]
+\caption{\method{} online step (one query head; identical to Loki's)}
+\label{alg:online}
+\begin{algorithmic}[1]
+\Require basis $\bU_{\mathrm{full}}$ of the head's KV group, scoring rank $r$, budget $k$
+\Require rotated key cache $\hat\bK=\bK\bU_{\mathrm{full}}\in\R^{S\times d}$ (maintained incrementally), values $\bV$
+\State $\hat\bq\gets\bU_{\mathrm{full}}^\top\bq$ \Comment{$O(d^2)$}
+\State $\tilde{\mathbf{s}}\gets\hat\bK_{:,1:r}\,\hat\bq_{1:r}$ \Comment{latent scores, $O(Sr)$}
+\State $\mathcal{T}\gets\mathrm{topk}(\tilde{\mathbf{s}},k)$
+\State $\mathbf{s}_{\mathcal{T}}\gets\hat\bK_{\mathcal{T},:}\,\hat\bq/\sqrt d$ \Comment{exact scores, $O(kd)$, by Lemma~\ref{lem:exact}}
+\State $\mathbf{y}\gets\mathrm{softmax}(\mathbf{s}_{\mathcal{T}})\,\bV_{\mathcal{T},:}$ \Comment{$O(kd)$}
+\end{algorithmic}
+\end{algorithm}
+
+\subsection{Online selection}
+
+Algorithm~\ref{alg:online} is Loki's algorithm verbatim. Each new key is
+rotated once when written to the cache; each query is rotated once per step.
+Latent scores use the first $r$ rotated coordinates of every cached key;
+exact scores on the top-$k$ use all $d$ rotated coordinates. Because
+$\bU_{\mathrm{full}}$ is orthogonal, the exact scores equal $\bq^\top\bk_j$
+and no reconstruction is needed. Values are untouched.
+
+\subsection{Cost analysis}
+\label{sec:cost}
+
+Let $S$ be the cache length, $d$ the head dimension, $r$ the scoring rank and
+$k$ the number of selected tokens, and count multiply--adds and bytes moved
+per query head per decode step (Table~\ref{tab:cost}). Full attention reads
+$2Sd$ elements and does $2Sd$ multiply--adds. Loki and \method{} read
+$Sr+2kd$ elements and do $Sr+2kd$ multiply--adds plus $2d^2$ for the two
+rotations, which is independent of $S$. With Loki's standard settings
+$r/d=1/4$ and $k/S=1/8$ the data-movement ratio is
+$(r/d+2k/S)/2=(0.25+0.25)/2=1/4$.
+
+\begin{table}[t]
+\centering
+\caption{Per-head, per-step cost. \method{} and Loki are identical by construction.}
+\label{tab:cost}
+\begin{tabular}{lccc}
+\toprule
+ & Elements read & Multiply--adds & Extra state \\
+\midrule
+Full attention & $2Sd$ & $2Sd$ & -- \\
+Loki           & $Sr+2kd$ & $Sr+2kd+2d^2$ & $\bU_{\mathrm{full}}$ ($d^2$ per KV head) \\
+\method{}      & $Sr+2kd$ & $Sr+2kd+2d^2$ & $\bU_{\mathrm{full}}$ ($d^2$ per KV head) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Because the two methods share layouts and kernels, we do not claim any
+throughput advantage over Loki, and we reuse Loki's Triton kernels unchanged.
+The systems claim of this paper is that the selection family delivers real
+decode speedup at long context (already established by Loki); the accuracy
+claim is that \method{} achieves better recall and perplexity at the same
+compression ratio. We keep these two claims separate.
+
+\subsection{Handling rotary embeddings}
+\label{sec:rope}
+
+RoPE is a position-dependent rotation applied to $\bq$ and $\bk$ before the
+dot product. Two design points follow.
+
+\paragraph{Fit/inference alignment is mandatory.}
+If the basis is fitted on pre-RoPE states, it must be applied to pre-RoPE
+states; if fitted post-RoPE, applied post-RoPE. A mismatch destroys recall
+(Section~\ref{sec:results}; we observed near-random recall in an early run
+with a pre-RoPE basis applied to post-RoPE keys). Algorithm~\ref{alg:offline}
+records the rotary type in the emitted metadata and the loader refuses a
+mismatch.
+
+\paragraph{Post-RoPE is the default for selection.}
+Post-RoPE $\bC$ averages the rotation over positions in the calibration set.
+Its top singular directions are therefore the directions along which
+queries and keys stay aligned \emph{after} RoPE, which is what the deployed
+dot product sees. The price is a higher effective rank, as Loki also found.
+The pre-RoPE alternative, used by SALS and ShadowKV for storage, keeps rank
+low but requires applying RoPE after selection and raises the question of
+whether pre-RoPE subspaces transfer across sequences at long context. We
+isolate the two factors with the $2\times2$ experiment
+$\{\text{pre},\text{post}\}\times\{\Sk,\bC\}$ in Section~\ref{sec:results}.
+
+\subsection{What \method{} is not}
+\label{sec:notcompress}
+
+The \method{} basis is a \emph{selection} basis, not a \emph{storage} basis.
+Storing only the rank-$r$ latents $\hat\bK_{:,1:r}$ and using the latent
+scores as final attention logits fails badly: since
+$\bq^\top\bP\bk=(\bU^\top\bq)^\top(\bU^\top\bk)$, this is exactly the
+selection score used as the final logit, and $\bU$ was chosen to capture
+alignment directions, not key energy, so peak logits shrink and the softmax
+flattens. Softmax is sensitive to score \emph{magnitudes}, not just their
+order. If memory compression is wanted, the correct design is two bases:
+store in a key-energy basis (Loki/SALS) and select with \method{}; we leave
+this to future work.
+
+% =====================================================================
+\section{Experimental Setup}
+\label{sec:setup_exp}
+
+\paragraph{Models.}
+\TODO{Llama-2-7B, Mistral-7B-v0.2 (GQA, $G=4$), Llama-3.1-8B-Instruct
+(GQA, $G=4$), OpenLLaMA-3B-v2; add larger models if compute allows.}
+
+\paragraph{Calibration.}
+\TODO{WikiText-2 train split (and C4/BookCorpus for the cross-dataset test),
+$N$ tokens, sequence length $L$, chunking; state whether moments are
+uncentered (they are).}
+
+\paragraph{Baselines.}
+Full attention; Loki (per-KV-head key-PCA) \citep{loki}; SALS basis
+(joint-head key-PCA, used as a selector) \citep{sals}; SWAN basis
+\citep{swan}; SparQ \citep{sparq}; H2O \citep{h2o} as an eviction reference;
+the per-query-head oracle of Section~\ref{sec:gqa}; and the $J$-opt oracle
+of Section~\ref{sec:oracle}. All selection baselines use the same $r$, $k$,
+sink/recent protection and kernels.
+
+\paragraph{Metrics.}
+\begin{itemize}[leftmargin=*,itemsep=1pt]
+  \item \emph{Attention-mass recall}: the fraction of full-attention
+  probability mass that falls on the selected set $\mathcal{T}$, averaged
+  over heads and positions.
+  \item \emph{Attention-output error} (relL2):
+  $\norm{\mathbf{y}_{\mathrm{sparse}}-\mathbf{y}_{\mathrm{full}}}/\norm{\mathbf{y}_{\mathrm{full}}}$.
+  \item \emph{Perplexity} on WikiText-2 \TODO{and C4}, at sequence length
+  \TODO{$L$}.
+  \item \emph{Downstream accuracy}: \TODO{lm-evaluation-harness tasks (as in
+  Loki: HellaSwag, MMLU, Winogrande, ARC, TruthfulQA, GSM8K) and long-context
+  tasks (LongBench, RULER, HotpotQA, Musique)}.
+  \item \emph{Score MSE and surrogate}: empirical $\frac1N\sum_n(\bq_n^\top\bM\bk_n)^2$
+  and the closed-form $J$ of \eqref{eq:wick}, per head.
+\end{itemize}
+
+\paragraph{Compression settings.}
+Following Loki we sweep $r/d\in\{1/16,1/8,1/4,1/2\}$ and
+$k/S\in\{1/8,1/4,1/2\}$. Unless stated otherwise, headline numbers use
+$r/d=1/4$, $k/S=1/8$. \TODO{State $d$ for each model and the exact $r$ values.}
+
+\paragraph{Hardware.}
+\TODO{H100 80GB; Nsight Compute for DRAM-byte measurements.}
+
+% =====================================================================
+\section{Results}
+\label{sec:results}
+
+\subsection{Selection fidelity}
+
+\begin{table}[t]
+\centering
+\caption{Selection fidelity at $k/S=1/8$ versus scoring rank $r$. Higher recall and lower relL2 are better. \TODO{Fill.}}
+\label{tab:fidelity}
+\begin{tabular}{llcccccc}
+\toprule
+\multirow{2}{*}{Model} & \multirow{2}{*}{Method} & \multicolumn{3}{c}{Mass recall} & \multicolumn{3}{c}{relL2} \\
+\cmidrule(lr){3-5}\cmidrule(lr){6-8}
+ & & $r{=}8$ & $r{=}16$ & $r{=}32$ & $r{=}8$ & $r{=}16$ & $r{=}32$ \\
+\midrule
+\multirow{4}{*}{Mistral-7B}
+ & Loki      & \NUM & \NUM & \NUM & \NUM & \NUM & \NUM \\
+ & SALS-basis& \NUM & \NUM & \NUM & \NUM & \NUM & \NUM \\
+ & SWAN      & \NUM & \NUM & \NUM & \NUM & \NUM & \NUM \\
+ & \method{} & \NUM & \NUM & \NUM & \NUM & \NUM & \NUM \\
+\midrule
+\multirow{4}{*}{Llama-3.1-8B-Instruct}
+ & Loki      & \NUM & \NUM & \NUM & \NUM & \NUM & \NUM \\
+ & SALS-basis& \NUM & \NUM & \NUM & \NUM & \NUM & \NUM \\
+ & SWAN      & \NUM & \NUM & \NUM & \NUM & \NUM & \NUM \\
+ & \method{} & \NUM & \NUM & \NUM & \NUM & \NUM & \NUM \\
+\midrule
+\multirow{2}{*}{Llama-2-7B}
+ & Loki      & \NUM & \NUM & \NUM & \NUM & \NUM & \NUM \\
+ & \method{} & \NUM & \NUM & \NUM & \NUM & \NUM & \NUM \\
+\bottomrule
+\end{tabular}
+\end{table}
+% INTERNAL (verify): Mistral-7B, r=8, k=0.125 — mass recall 0.922 (CrossCov) vs
+% 0.868 (Loki); relL2 0.149 vs 0.472; PPL gap +0.04 vs +0.95.
+% Llama-3.1-8B-Instruct, 8K, keep=0.125: select-mode PPL 5.43 (r=8) -> 4.93 (r=64).
+
+\TODO{One paragraph: \method{} improves recall by $\Delta$ and cuts relL2 by
+$\times$ at every rank; the gap is largest at small $r$ where the basis
+choice matters most and closes as $r\to d$ (Lemma~\ref{lem:exact}).}
+
+\subsection{Perplexity and downstream accuracy}
+
+\begin{table}[t]
+\centering
+\caption{Perplexity (WikiText-2) and downstream accuracy at $r/d=1/4$, $k/S=1/8$, in the format of Loki's Table~1. \TODO{Fill; add rows for other $(r,k)$ settings in the appendix.}}
+\label{tab:main}
+\small
+\begin{tabular}{llcccccccc}
+\toprule
+Model & Method & PPL & HellaSwag & MMLU & Winogrande & ARC-c & TruthfulQA & GSM8K & Avg \\
+\midrule
+\multirow{4}{*}{\TODO{Model 1}}
+ & Full      & \NUM & \NUM & \NUM & \NUM & \NUM & \NUM & \NUM & \NUM \\
+ & H2O       & \NUM & \NUM & \NUM & \NUM & \NUM & \NUM & \NUM & \NUM \\
+ & Loki      & \NUM & \NUM & \NUM & \NUM & \NUM & \NUM & \NUM & \NUM \\
+ & \method{} & \NUM & \NUM & \NUM & \NUM & \NUM & \NUM & \NUM & \NUM \\
+\midrule
+\multirow{4}{*}{\TODO{Model 2}}
+ & Full      & \NUM & \NUM & \NUM & \NUM & \NUM & \NUM & \NUM & \NUM \\
+ & H2O       & \NUM & \NUM & \NUM & \NUM & \NUM & \NUM & \NUM & \NUM \\
+ & Loki      & \NUM & \NUM & \NUM & \NUM & \NUM & \NUM & \NUM & \NUM \\
+ & \method{} & \NUM & \NUM & \NUM & \NUM & \NUM & \NUM & \NUM & \NUM \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[t]
+\centering
+\caption{Long-context tasks at $r/d=1/4$, $k/S=1/8$. \TODO{Fill; RULER subtasks are where SALS-type selectors are known to crack, so report them separately.}}
+\label{tab:long}
+\begin{tabular}{llcccc}
+\toprule
+Model & Method & LongBench (avg) & RULER (avg) & HotpotQA & Musique \\
+\midrule
+\multirow{3}{*}{\TODO{Model}}
+ & Full      & \NUM & \NUM & \NUM & \NUM \\
+ & Loki      & \NUM & \NUM & \NUM & \NUM \\
+ & \method{} & \NUM & \NUM & \NUM & \NUM \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\TODO{One paragraph. Include the causal chain: better basis $\to$ higher recall
+$\to$ lower relL2 $\to$ smaller PPL gap $\to$ smaller accuracy drop. State the
+average accuracy degradation vs full attention for both methods, as Loki did
+(``only 6.8\%'').}
+
+\subsection{Ablations}
+
+\paragraph{GQA pooling.}
+\begin{table}[h]
+\centering
+\caption{Basis construction under GQA (Mistral-7B, $G=4$, $k/S=1/8$). Per-query-head is an oracle that needs $G$ latent key copies. \TODO{Fill.}}
+\label{tab:gqa}
+\begin{tabular}{lcccc}
+\toprule
+Basis & \#bases/layer & Recall $r{=}8$ & Recall $r{=}16$ & relL2 $r{=}8$ \\
+\midrule
+Loki (key-PCA, per KV head) & \TODO{8} & \NUM & \NUM & \NUM \\
+\method{}, first query head only & \TODO{8} & \NUM & \NUM & \NUM \\
+\method{}, pooled (Theorem~\ref{thm:gqa}) & \TODO{8} & \NUM & \NUM & \NUM \\
+\method{}, per query head (oracle) & \TODO{32} & \NUM & \NUM & \NUM \\
+\bottomrule
+\end{tabular}
+\end{table}
+% INTERNAL (verify): pooled vs Loki recall gains on Mistral-7B: +0.0159 at r=8,
+% +0.0191 at r=16; pooled slightly below per-query-head upper bound.
+
+\paragraph{Alignment ratio predicts the gain.}
+\label{sec:rho}
+\begin{figure}[h]
+  \centering
+  \fbox{\parbox{0.9\linewidth}{\centering\vspace{2.5cm}
+  \TODO{Figure 4. Scatter of per-head relL2 improvement (Loki $-$ \method{})
+  against $\rho_h$, with Spearman correlation. One point per (layer, KV head).}
+  \vspace{2.5cm}}}
+  \caption{\TODO{Per-head advantage vs alignment ratio.}}
+  \label{fig:rho_scatter}
+\end{figure}
+\TODO{Report Spearman $\rho$ and note that low-$\rho_h$ heads show no loss,
+consistent with Corollary~\ref{cor:regime}.}
+
+\paragraph{Oracle gap.}
+\begin{table}[h]
+\centering
+\caption{Fraction of the Loki$\to$$J$-opt gap closed by each closed-form basis, pre-RoPE, averaged over heads (and over high-$\rho_h$ heads). \TODO{Fill.}}
+\label{tab:oracle}
+\begin{tabular}{lcccc}
+\toprule
+Basis & $J$ (closed form) & Empirical score MSE & Recall $r{=}8$ & Gap closed \\
+\midrule
+Loki & \NUM & \NUM & \NUM & 0\% \\
+SWAN & \NUM & \NUM & \NUM & \NUM\% \\
+\method{} & \NUM & \NUM & \NUM & \NUM\% \\
+$J$-opt oracle & \NUM & \NUM & \NUM & 100\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+\TODO{Also report the rank correlation between closed-form $J$ and empirical
+score MSE across bases and heads, validating the Gaussian surrogate.}
+
+\paragraph{Rotary treatment ($2\times2$).}
+\begin{table}[h]
+\centering
+\caption{Basis statistic $\times$ rotary treatment, with fit and inference always matched. \TODO{Fill.} The wedge attributable to the statistic is the column difference at fixed row.}
+\label{tab:rope}
+\begin{tabular}{lcc}
+\toprule
+Fit/apply & Key-PCA ($\Sk$) & Cross-cov ($\bC$) \\
+\midrule
+pre-RoPE  & recall \NUM / PPL \NUM & recall \NUM / PPL \NUM \\
+post-RoPE & recall \NUM / PPL \NUM & recall \NUM / PPL \NUM \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Cross-dataset generalization.}
+\TODO{Table: basis fitted on WikiText-2 / C4 / BookCorpus, evaluated on each;
+mirror Loki's Section~6.3. Include the held-out chunk split.}
+
+\paragraph{Sanity checks.}
+Feeding keys as both sides of the calibration reproduces Loki's components
+to \TODO{$10^{-x}$} (Lemma~\ref{lem:collapse}). The asymmetric $\bU/\bV$
+variant gives recall \TODO{$\approx k/S$} at every $r$, as predicted by
+Lemma~\ref{lem:exact}.
+
+\subsection{Computational efficiency}
+
+\TODO{Report Loki's kernel speedup numbers reproduced on our hardware for
+the selection family (e.g.\ attention-step time vs sequence length for
+$r/d=1/4$, $k/S=1/8$) and DRAM bytes from Nsight Compute. State explicitly
+that \method{} and Loki run the same kernels and have identical timing; this
+subsection exists to show that the accuracy gains come at no runtime cost.}
+
+% =====================================================================
+\section{Limitations and Future Work}
+\label{sec:limits}
+
+\paragraph{Surrogate assumptions.} The decomposition of
+Theorem~\ref{thm:wick} closes the fourth moment with a Gaussian assumption
+and targets the pre-softmax score. We validate both bridges empirically
+(surrogate ranking agrees with empirical score MSE; score MSE tracks recall,
+relL2 and perplexity), but neither is a theorem about the end task.
+
+\paragraph{Selection, not compression.} \method{} keeps the full KV cache.
+Section~\ref{sec:notcompress} explains why the selection basis cannot double
+as a storage basis; a two-basis design that stores in a key-energy basis and
+selects with \method{} is the natural extension.
+
+\paragraph{Long-context transfer.} Post-RoPE bases average over calibration
+positions. Whether they, or pre-RoPE bases, transfer to sequences much longer
+than the calibration length is an open question raised by ShadowKV; our
+$2\times2$ experiment is at \TODO{length}.
+
+\paragraph{Dynamic bases.} $\bC$ is a corpus-level statistic. A per-sequence
+or per-prefix $\bC$ would adapt to the prompt at the cost of an online SVD.
+
+% =====================================================================
+\section{Conclusion}
+\label{sec:conclusion}
+
+The basis that sparse attention uses to shrink queries and keys should be
+chosen for the scores it preserves, not for the keys it reconstructs. We
+made this precise by decomposing the expected squared score error into an
+alignment term and a fluctuation term, showed that key-PCA minimizes a
+degenerate case of the latter and ignores the former, and proposed
+\method{}, whose basis is the top left singular subspace of the query--key
+cross-covariance and is surrogate-optimal for the alignment term, with an
+exactly optimal GQA-pooled form. Changing this one offline statistic, and
+nothing else, gives \TODO{summary of gains} at identical runtime cost.
+
+% =====================================================================
+\section*{Reproducibility}
+Code: \TODO{URL}. Calibration scripts, basis artifacts with metadata, and the
+oracle optimizer are released. \TODO{Compute estimate, as in Loki's Appendix~F.}
+
+% =====================================================================
+\bibliographystyle{plainnat}
+\begin{thebibliography}{99}
+\bibitem[Singhania et~al.(2024)]{loki} P.~Singhania, S.~Singh, S.~He, S.~Feizi, A.~Bhatele. Loki: Low-rank keys for efficient sparse attention. \emph{NeurIPS}, 2024. arXiv:2406.02542.
+\bibitem[Ribar et~al.(2024)]{sparq} L.~Ribar et~al. SparQ attention: Bandwidth-efficient LLM inference. \emph{ICML}, 2024. arXiv:2312.04985.
+\bibitem[SALS(2025)]{sals} \TODO{SALS authors}. SALS: sparse attention in latent space. \emph{NeurIPS}, 2025. arXiv:2510.24273.
+\bibitem[SWAN(2025)]{swan} \TODO{SWAN authors, title, venue, arXiv id.}
+\bibitem[SVDq(2025)]{svdq} \TODO{SVDq authors, title, venue, arXiv id.}
+\bibitem[Sun et~al.(2024)]{shadowkv} H.~Sun et~al. ShadowKV: KV cache in shadows for high-throughput long-context LLM inference. arXiv:2410.21465.
+\bibitem[Bello(2021)]{lambda} I.~Bello. LambdaNetworks: Modeling long-range interactions without attention. \emph{ICLR}, 2021. arXiv:2102.08602.
+\bibitem[Zhang et~al.(2023)]{h2o} Z.~Zhang et~al. H2O: Heavy-hitter oracle for efficient generative inference of LLMs. \emph{NeurIPS}, 2023.
+\bibitem[Xiao et~al.(2024)]{streamingllm} G.~Xiao et~al. Efficient streaming language models with attention sinks. \emph{ICLR}, 2024.
+\bibitem[Liu et~al.(2023)]{scissorhands} Z.~Liu et~al. Scissorhands: Exploiting the persistence of importance hypothesis for LLM KV cache compression. \emph{NeurIPS}, 2023.
+\bibitem[KeyDiff(2025)]{keydiff} \TODO{KeyDiff authors (Qualcomm)}. KeyDiff. \emph{NeurIPS}, 2025.
+\bibitem[Feng et~al.(2025)]{adakv} Y.~Feng et~al. Ada-KV: Optimizing KV cache eviction by adaptive budget allocation. \emph{NeurIPS}, 2025.
+\bibitem[Liu et~al.(2024)]{kivi} Z.~Liu et~al. KIVI: A tuning-free asymmetric 2-bit quantization for KV cache. \emph{ICML}, 2024.
+\bibitem[Su et~al.(2024)]{rope} J.~Su et~al. RoFormer: Enhanced transformer with rotary position embedding. \emph{Neurocomputing}, 2024.
+\bibitem[Ainslie et~al.(2023)]{gqa} J.~Ainslie et~al. GQA: Training generalized multi-query transformer models from multi-head checkpoints. \emph{EMNLP}, 2023.
+\end{thebibliography}
+
+% =====================================================================
+\appendix
+
+\section{Additional Derivations}
+\label{app:derivations}
+
+\subsection{Relation between score error and top-$k$ membership}
+\label{app:margin}
+Let $s_j$ be true scores, $\tilde s_j=s_j-\epsilon_j$ approximate scores with
+$\epsilon_j=\bq^\top\bM\bk_j$, and $\tau$ the $k$-th largest true score. A
+token $j$ with $s_j\ge\tau$ is dropped only if some token $i$ with $s_i<\tau$
+satisfies $\tilde s_i>\tilde s_j$, which requires
+$\epsilon_j-\epsilon_i>s_j-s_i\ge s_j-\tau+\tau-s_i$. Hence a wrong swap
+between $j$ and $i$ needs $|\epsilon_j|+|\epsilon_i|>$ their combined margin
+to $\tau$. By Markov's inequality on $\epsilon_j^2$, the probability that
+token $j$'s error exceeds a margin $m_j$ is at most $J/m_j^2$ under the
+calibration distribution, which is how $J$ enters ranking error.
+
+\subsection{Frobenius surrogate and the alignment terms: tightness}
+Equality in Proposition~\ref{prop:bound}'s first inequality holds when
+$\bM\bC$ is symmetric; in the second when $\bM\bC\propto\bM$ on
+$\mathrm{range}(\bM)$. Both hold for symmetric PSD $\bC$ in its eigenbasis,
+which is why Proposition~\ref{prop:iso} is exact there.
+
+\subsection{Whitened variant}
+\label{app:whiten}
+The exact Eckart--Young statement for the score $\bq^\top\bk$ under general
+$\Sq,\Sk$ is obtained by whitening: with
+$\tilde\bC=\Sk^{-1/2}\bC\Sq^{-1/2}$, the best rank-$r$ approximation of
+$\tilde\bC$ minimizes $\E[(\bq^\top\bk-\tilde s)^2]$ over \emph{all}
+bilinear rank-$r$ forms, not only shared orthogonal projectors. The resulting
+key- and query-side maps differ, which brings back the asymmetric
+full-rank problem of Lemma~\ref{lem:exact} unless the maps are re-orthonormalized.
+\TODO{Report the whitened variant as an ablation only if its projector is
+re-orthonormalized; otherwise omit.}
+
+\section{Oracle Optimization on the Grassmannian}
+\label{app:oracle}
+We minimize $J_{\mathrm{grp}}(\bU)$ over $\bU^\top\bU=\bI_r$ using the
+pre-RoPE closed forms of \eqref{eq:closedform}. Gradient with respect to $\bM$
+(treating $\bM$ as a free symmetric matrix, then projecting):
+\begin{align}
+\nabla_{\bM}(\tr\bM\bC)^2 &= 2(\tr\bM\bC)\,\bC^\top,\\
+\nabla_{\bM}\tr(\bM\bC\bM\bC) &= \bC\bM\bC+\bC^\top\bM\bC^\top,\\
+\nabla_{\bM}\tr(\bM\Sq\bM\Sk) &= \Sq\bM\Sk+\Sk\bM\Sq .
+\end{align}
+Since $\bM=\bI-\bU\bU^\top$, $\nabla_{\bU}J=-2\,\mathrm{sym}(\nabla_{\bM}J)\,\bU$.
+We take the Riemannian gradient $(\bI-\bU\bU^\top)\nabla_{\bU}J$, step, and
+retract by QR. Initialize at the \method{} basis; $d=128$, $r\le64$,
+\TODO{iterations, learning rate, convergence tolerance}. Runtime per KV head:
+\TODO{seconds}.
+
+\section{Negative Result: Asymmetric $\bU/\bV$ Projection}
+\label{app:asym}
+\TODO{Table of recall vs $r$ for keys$\to\bU$, queries$\to\bV$ on Llama-2-7B,
+showing recall at the $k/S$ floor for pre-RoPE and flat post-RoPE, with the
+explanation of Lemma~\ref{lem:exact}.}
+% INTERNAL (verify): pre-RoPE asymmetric recall 0.097-0.119 at top_k=0.125 on OpenLLaMA.
+
+\section{Complete Results}
+\label{app:full}
+\TODO{Full $(r,k)$ sweep for every model, mirroring Loki's Appendix~B.}
+
+\end{document}
